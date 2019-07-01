@@ -1,7 +1,11 @@
 from enum import Enum, auto
 from collections import namedtuple
+from recordclass import dataobject
 import random
 import math
+
+import sys
+import argparse
 
 TICKS_PER_BEAT = 48
 
@@ -9,21 +13,21 @@ TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
 class Button(Enum):
     @classmethod
-    def from_track_num(this, num: int):
+    def from_track_num(cls, num: int):
         if num == 2:
-            return this.FX_L
+            return cls.FX_L
         elif num == 3:
-            return this.BT_A
+            return cls.BT_A
         elif num == 4:
-            return this.BT_B
+            return cls.BT_B
         elif num == 5:
-            return this.BT_C
+            return cls.BT_C
         elif num == 6:
-            return this.BT_D
+            return cls.BT_D
         elif num == 7:
-            return this.FX_R
+            return cls.FX_R
         else:
-            return None
+            raise ValueError('Invalid track number for button: {}'.format(num))
 
     def is_fx(self):
         return self == Button.FX_L or self == Button.FX_R
@@ -76,7 +80,7 @@ class Timing:
         self.offset = offset
 
     @classmethod
-    def from_time_str(cls, time):
+    def from_time_str(cls, time: str):
         splitted = time.split(',')
         if int(splitted[2]) >= TICKS_PER_BEAT:
             raise ValueError('Offset greater than maximum')
@@ -91,32 +95,58 @@ class Timing:
     def __str__(self):
         return '{},{},{}'.format(self.measure, self.beat, self.offset)
 
+    def __cmp__(self, other):
+        if self.measure == other.measure:
+            if self.beat == other.beat:
+                return self.offset - other.offset
+            return self.beat - other.beat
+        return self.measure - other.measure
+
 class ButtonPress:
     def __init__(self, time: Timing, button: Button, duration: int):
         self.time = time
         self.button = button
         self.duration = duration
 
+class LaserSide(Enum):
+    def as_letter(self):
+        return 'l' if self == LaserSide.LEFT else 'r'
+
+    LEFT = auto()
+    RIGHT = auto()
+
+class LaserCont(Enum):
+    """ The continuity status of a laser node. """
+    CONTINUE = 0
+    START = 1
+    END = 2
+
 class LaserNode:
-    class Laser(Enum):
-        LEFT = auto()
-        RIGHT = auto()
+    class Builder(dataobject):
+        time: Timing = None
+        side: LaserSide = None
+        position: int = None
+        node_type: LaserCont = None
+        range: int = 1
 
-    class Type(Enum):
-        CONTINUE = 0
-        START = 1
-        END = 2
-
-    def __init__(self, time: Timing, laser: Laser, position: int, node_type: Type):
-        self.time = time
-        self.laser = laser
-        self.position = position
-        self.node_type = node_type
+    def __init__(self, builder: Builder):
+        self.time = builder.time
+        self.side = builder.side
+        self.position = builder.position
+        self.node_type = builder.node_type
+        self.range = builder.range
 
     @staticmethod
     def kshpos(pos):
-        offset = math.floor(pos / 2)
-        return chr(ord('0') + offset)
+        chars = []
+        for c in range(10):
+            chars.append(chr(ord('0') + c))
+        for c in range(24):
+            chars.append(chr(ord('A') + c))
+        for c in range(15):
+            chars.append(chr(ord('a') + c))
+        idx = math.floor((pos / 127) * (len(chars) - 1))
+        return chars[idx]
 
 class LaserSlam:
     def __init__(self, start: LaserNode, end: LaserNode):
@@ -125,6 +155,8 @@ class LaserSlam:
         self.start = start
         self.end = end
         self.time = start.time
+
+LaserRangeChange = namedtuple('LaserRangeChange', 'time side range')
 
 class Vox:
     class State(Enum):
@@ -187,23 +219,29 @@ class Vox:
             pass
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:
-                laser_side = LaserNode.Laser.LEFT if self.state_track == 1 else LaserNode.Laser.RIGHT
-                position = int(splitted[1])
-                if position > 127 or position < 0:
-                    raise ValueError('laser position out of bounds: {}'.format(position))
-                laser_type = LaserNode.Type(int(splitted[2]))
-                laser = LaserNode(Timing.from_time_str(splitted[0]), laser_side, position, laser_type)
+                laser_node = LaserNode.Builder()
+                laser_node.time = Timing.from_time_str(splitted[0])
+                laser_node.side = LaserSide.LEFT if self.state_track == 1 else LaserSide.RIGHT
+                laser_node.position = int(splitted[1])
+                laser_node.node_type = LaserCont(int(splitted[2]))
+                if splitted[5]:
+                    laser_node.range = int(splitted[5])
+                laser_node = LaserNode(laser_node)
+
+                if laser_node.position > 127 or laser_node.position < 0:
+                    raise ValueError('laser position out of bounds: {}'.format(laser_node.position))
+
                 # Check if it's a slam.
                 slam_start = None
                 for e in self.events:
-                    if type(e) is LaserNode and e.laser == laser.laser and e.time == laser.time:
+                    if type(e) is LaserNode and e.side == laser_node.side and e.time == laser_node.time:
                         # We're gonna remove the laser node and replace  it with a slam node.
                         slam_start = e
                         break
                 if slam_start is None:
-                    self.events.append(laser)
+                    self.events.append(laser_node)
                 else:
-                    slam = LaserSlam(slam_start, laser)
+                    slam = LaserSlam(slam_start, laser_node)
                     self.events.remove(slam_start)
                     self.events.append(slam)
             else:
@@ -214,7 +252,7 @@ class Vox:
         # TODO
         return TimeSignature(4, 4)
 
-    def as_ksh(self):
+    def as_ksh(self, file=sys.stdout):
         print('''title=
 artist=
 effect=
@@ -239,41 +277,43 @@ ver=167
 beat=4/4''')
         # Holds come in the pair <button>,<duration>
         holds = []
-        lasers = {LaserNode.Laser.LEFT: False, LaserNode.Laser.RIGHT: False}
+        lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slams = []
         for m in range(self.end.measure):
             measure = m + 1
+
+            # Laser range resets every measure with KSH
+            laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
             for b in range(self.signature_at_time(None).top):
                 beat = b + 1
-                for o in range(48):
-                    buttons_here = []
-                    lasers_here = {LaserNode.Laser.LEFT: None, LaserNode.Laser.RIGHT: None}
+                for o in range(TICKS_PER_BEAT):
                     buffer = ''
+
+                    buttons_here = []
+                    lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}
                     for e in filter(lambda e: e.time == Timing(measure, beat, o), self.events):
                         # Check if it's a hold first.
                         if type(e) is ButtonPress and e.duration != 0:
                             if Button.is_fx(e.button):
-                                if e.button == Button.FX_L:
-                                    letter = 'l'
-                                else:
-                                    letter = 'r'
                                 # Assign random FX to FX hold.
-                                buffer += 'fx-{}={}\n'.format(letter, random.choice(list(KshootEffect)).to_ksh_name())
+                                buffer += 'fx-{}={}\n'.format('l' if e.button == Button.FX_L else 'r', random.choice(list(KshootEffect)).to_ksh_name())
                             holds.append([e.button, e.duration])
                         elif type(e) is ButtonPress:
                             buttons_here.append(e.button)
                         elif type(e) is LaserNode:
-                            lasers_here[e.laser] = e
-                            if e.node_type == LaserNode.Type.START:
-                                lasers[e.laser] = True
-                            elif e.node_type == LaserNode.Type.END:
-                                lasers[e.laser] = False
+                            if e.range != laser_range[e.side]:
+                                buffer += 'laserrange_{}={}x\n'.format(e.side.as_letter(), e.range)
+                                laser_range[e.side] = e.range
+
+                            lasers_here[e.side] = e
+                            if e.node_type == LaserCont.START:
+                                lasers[e.side] = True
+                            elif e.node_type == LaserCont.END:
+                                lasers[e.side] = False
                         elif type(e) is LaserSlam:
-                            lasers_here[e.start.laser] = e.start
-                            # Slam tuple: <slam>,<whether we're on the second end>
+                            lasers_here[e.start.side] = e.start
+                            # Slam tuple: <slam>,<ticks since slam start>
                             slams.append([e, 0])
-                        else:
-                            print(type(e))
 
                     # Print button state.
                     for b in [
@@ -306,20 +346,20 @@ beat=4/4''')
 
                     # Now print laser state.
                     for l in [
-                        LaserNode.Laser.LEFT,
-                        LaserNode.Laser.RIGHT
+                        LaserSide.LEFT,
+                        LaserSide.RIGHT
                     ]:
                         slam = None
                         laser_cancel = False
                         for s in slams:
-                            if s[0].start.laser == l and (s[0].time == Timing(measure, beat, o) or s[1]):
+                            if s[0].start.side == l and (s[0].time == Timing(measure, beat, o) or s[1]):
                                 slam = s
                                 break
                         if slam is not None:
                             if slam[1] == 3:
                                 buffer += LaserNode.kshpos(slam[0].end.position)
                                 slams.remove(slam)
-                                if slam[0].end.node_type == LaserNode.Type.END:
+                                if slam[0].end.node_type == LaserCont.END:
                                     lasers[l] = False
                                     laser_cancel = True
                             else:
@@ -335,14 +375,14 @@ beat=4/4''')
                                 # No laser event or ongoing laser.
                                 buffer += '-'
 
-                    print(buffer)
+                    print(buffer, file=file)
 
                     # Subtract time remaining from holds.
                     for h in holds:
                         h[1] -= 1
                     holds = list(filter(lambda h: h[1] > 0, holds))
 
-            print('--')
+            print('--', file=file)
 
 
     @classmethod
@@ -373,5 +413,20 @@ beat=4/4''')
 
         return parser
 
-vox = Vox.from_file('data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox')
-vox.as_ksh()
+CASES = {
+    'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
+    'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox'
+}
+
+parser = argparse.ArgumentParser(description='Convert vox to ksh')
+parser.add_argument('-t', '--testcase')
+args = parser.parse_args()
+
+if args.testcase:
+    if not CASES[args.testcase]:
+        print('please specify a valid testcase', file=sys.stderr)
+        print('valid testcases are:', file=sys.stderr)
+        for c in CASES.keys():
+            print('\t' + c)
+    vox = Vox.from_file(CASES[args.testcase])
+    vox.as_ksh()

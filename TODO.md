@@ -12,4 +12,4 @@
 
 [ ] VOL effect configuration
 
-[ ] Out of bounds lasers
+[x] Out of bounds lasers

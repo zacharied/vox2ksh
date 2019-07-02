@@ -1,10 +1,11 @@
 from enum import Enum, auto
 from collections import namedtuple
 from recordclass import dataobject
+from xml.etree import ElementTree
 import random
 import math
 
-import sys
+import sys, os
 import argparse
 
 TICKS_PER_BEAT = 48
@@ -38,6 +39,40 @@ class Button(Enum):
     BT_D = auto()
     FX_L = auto()
     FX_R = auto()
+
+class Difficulty(Enum):
+    @classmethod
+    def from_letter(cls, letter):
+        if letter == 'n':
+            return cls.NOVICE
+        elif letter == 'a':
+            return cls.ADVANCED
+        elif letter == 'e':
+            return cls.EXHAUST
+        elif letter == 'm':
+            return cls.MAXIMUM
+        elif letter == 'i':
+            return cls.INFINITE
+        else:
+            raise ValueError('invalid letter for difficulty: {}'.format(letter))
+
+    def to_xml_name(self):
+        if self == self.NOVICE:
+            return 'novice'
+        elif self == self.ADVANCED:
+            return 'advanced'
+        elif self == self.EXHAUST:
+            return 'exhaust'
+        elif self == self.MAXIMUM:
+            return 'maximum'
+        elif self == self.INFINITE:
+            return 'infinite'
+
+    NOVICE = auto()
+    ADVANCED = auto()
+    EXHAUST = auto()
+    MAXIMUM = auto()
+    INFINITE = auto()
 
 class KshootEffect(Enum):
     def to_ksh_name(self):
@@ -201,6 +236,9 @@ class Vox:
         self.state = None
         self.state_track = 0
 
+        self.metadata: ElementTree = None
+        self.difficulty = None
+
     def process_state(self, line):
         splitted = line.split('\t')
 
@@ -274,7 +312,7 @@ chokkakuautovol=0
 chokkakuvol=50
 ver=167
 --
-beat=4/4''')
+beat=4/4''', file=file)
         # Holds come in the pair <button>,<duration>
         holds = []
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
@@ -384,12 +422,31 @@ beat=4/4''')
 
             print('--', file=file)
 
+    def get_metadata(self, tag, from_diff=False):
+        if from_diff:
+            the_diff = None
+            for diff in self.metadata.find('difficulty').iter():
+                if diff.tag == self.difficulty.to_xml_name():
+                    the_diff = diff
+                    break
+            if the_diff is None:
+                raise LookupError('difficulty {} not found in the `music` element'.format(self.difficulty.to_xml_name()))
+            # TODO HERE
+
+            return self.metadata.find()
 
     @classmethod
     def from_file(cls, path):
         parser = Vox()
 
         file = open(path, 'r')
+
+        song_id = int(os.path.basename(path).split('_')[1])
+        with open('data/music_db.xml') as db:
+            parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+            parser.metadata = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(song_id))[0]
+            parser.metadata_difficulty = parser.metadata.
+            print('Title is ' + parser.metadata.find('info').find('title_name').text)
 
         line_no = 1
         for line in file:
@@ -427,6 +484,6 @@ if args.testcase:
         print('please specify a valid testcase', file=sys.stderr)
         print('valid testcases are:', file=sys.stderr)
         for c in CASES.keys():
-            print('\t' + c)
+            print('\t' + c, file=sys.stderr)
     vox = Vox.from_file(CASES[args.testcase])
-    vox.as_ksh()
+    vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+"))

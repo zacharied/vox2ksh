@@ -374,7 +374,7 @@ ver=167''', file=file)
                         buffer += f'time={current_timesig.top}/{current_timesig.bottom}\n'
 
                     if now in self.bpms:
-                        buffer += f't={self.bpms[now]}\n'
+                        buffer += f't={str(self.bpms[now]).rstrip("0").rstrip(".")}\n'
 
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}

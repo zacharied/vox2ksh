@@ -327,7 +327,6 @@ class Vox:
                 button = Button.from_track_num(self.state_track)
                 self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1])))
 
-
     def as_ksh(self, file=sys.stdout, metadata_only=False):
         # First print metadata.
         # TODO song file, preview, chokkaku, yomigana titles(?), background
@@ -350,12 +349,12 @@ pfiltergain=50
 filtertype=peak
 chokkakuautovol=0
 chokkakuvol=50
-ver=167
---
-''', file=file)
+ver=167''', file=file)
 
         if metadata_only:
             return
+
+        print('--', file=file)
 
         # Holds come in the pair <button>,<duration>
         holds = []
@@ -499,7 +498,8 @@ ver=167
 
 CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
-    'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox'
+    'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox',
+    'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox'
 }
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')

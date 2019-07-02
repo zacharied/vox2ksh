@@ -372,7 +372,9 @@ ver=167''', file=file)
                     if now in self.time_sigs:
                         current_timesig = self.time_sigs[now]
                         buffer += f'time={current_timesig.top}/{current_timesig.bottom}\n'
-                        print('New timing: {}/{}'.format(current_timesig.top, current_timesig.bottom))
+
+                    if now in self.bpms:
+                        buffer += f't={self.bpms[now]}\n'
 
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}

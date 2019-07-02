@@ -55,6 +55,18 @@ class Difficulty(Enum):
             return cls.INFINITE
         else:
             raise ValueError('invalid letter for difficulty: {}'.format(letter))
+    def to_ksh_name(self):
+        if self == self.NOVICE:
+            return 'novice'
+        elif self == self.ADVANCED:
+            return 'advanced'
+        elif self == self.EXHAUST:
+            return 'extended'
+        elif self == self.INFINITE:
+            # TODO Correct?
+            return 'infinite'
+        elif self == self.MAXIMUM:
+            return 'maximum'
 
     def to_xml_name(self):
         if self == self.NOVICE:
@@ -239,6 +251,12 @@ class Vox:
         self.metadata: ElementTree = None
         self.difficulty = None
 
+    def bpm_string(self):
+        if self.get_metadata('bpm_min') == self.get_metadata('bpm_max'):
+            return int(int(self.get_metadata('bpm_min')) / 100)
+        else:
+            return f"{int(int(self.get_metadata('bpm_min')) / 100)}-{int(int(self.get_metadata('bpm_max')) / 100)}"
+
     def process_state(self, line):
         splitted = line.split('\t')
 
@@ -290,17 +308,32 @@ class Vox:
         # TODO
         return TimeSignature(4, 4)
 
-    def as_ksh(self, file=sys.stdout):
-        print('''title=
-artist=
-effect=
+    def get_metadata(self, tag, from_diff=False):
+        if from_diff:
+            the_diff = None
+            for diff in self.metadata.find('difficulty').iter():
+                if diff.tag == self.difficulty.to_xml_name():
+                    the_diff = diff
+                    break
+            if the_diff is None:
+                raise LookupError('difficulty {} not found in the `music` element'.format(self.difficulty.to_xml_name()))
+            return the_diff.find(tag).text
+        return self.metadata.find('info').find(tag).text
+
+
+    def as_ksh(self, file=sys.stdout, metadata_only=False):
+        # First print metadata.
+        # TODO song file, preview, chokkaku, yomigana titles(?), background
+        print(f'''title={self.get_metadata('title_name')}
+artist={self.get_metadata('artist_name')}
+effect={self.get_metadata('effected_by', True)}
 jacket=.jpg
-illustrator=
-difficulty=extended
-level=1
-t=140
+illustrator={self.get_metadata('illustrator', True)}
+difficulty={self.difficulty.to_ksh_name()}
+level={self.get_metadata('difnum', True)}
+t={self.bpm_string()}
 m=test.mp3
-mvol=75
+mvol={self.get_metadata('volume')}
 o=0
 bg=desert
 layer=arrow
@@ -312,7 +345,11 @@ chokkakuautovol=0
 chokkakuvol=50
 ver=167
 --
-beat=4/4''', file=file)
+''', file=file)
+
+        if metadata_only:
+            return
+
         # Holds come in the pair <button>,<duration>
         holds = []
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
@@ -422,19 +459,6 @@ beat=4/4''', file=file)
 
             print('--', file=file)
 
-    def get_metadata(self, tag, from_diff=False):
-        if from_diff:
-            the_diff = None
-            for diff in self.metadata.find('difficulty').iter():
-                if diff.tag == self.difficulty.to_xml_name():
-                    the_diff = diff
-                    break
-            if the_diff is None:
-                raise LookupError('difficulty {} not found in the `music` element'.format(self.difficulty.to_xml_name()))
-            # TODO HERE
-
-            return self.metadata.find()
-
     @classmethod
     def from_file(cls, path):
         parser = Vox()
@@ -442,11 +466,10 @@ beat=4/4''', file=file)
         file = open(path, 'r')
 
         song_id = int(os.path.basename(path).split('_')[1])
-        with open('data/music_db.xml') as db:
+        with open('data/music_db.xml', encoding='shift_jisx0213') as db:
             parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
             parser.metadata = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(song_id))[0]
-            parser.metadata_difficulty = parser.metadata.
-            print('Title is ' + parser.metadata.find('info').find('title_name').text)
+            parser.metadata_difficulty = next(filter(lambda d: d.tag == parser.difficulty.to_xml_name(), parser.metadata.find('difficulty')))
 
         line_no = 1
         for line in file:
@@ -473,9 +496,10 @@ CASES = {
     'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox'
 }
 
-parser = argparse.ArgumentParser(description='Convert vox to ksh')
-parser.add_argument('-t', '--testcase')
-args = parser.parse_args()
+argparser = argparse.ArgumentParser(description='Convert vox to ksh')
+argparser.add_argument('-t', '--testcase')
+argparser.add_argument('-m', '--metadata', action='store_true')
+args = argparser.parse_args()
 
 if args.testcase:
     if not CASES[args.testcase]:
@@ -484,4 +508,10 @@ if args.testcase:
         for c in CASES.keys():
             print('\t' + c, file=sys.stderr)
     vox = Vox.from_file(CASES[args.testcase])
-    vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+"))
+
+    vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+") if not args.metadata else sys.stdout, metadata_only=args.metadata)
+
+    exit(0)
+
+print('Please specify something to do.')
+exit(1)

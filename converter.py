@@ -276,15 +276,11 @@ class Vox:
         else:
             return f"{int(int(self.get_metadata('bpm_min')) / 100)}-{int(int(self.get_metadata('bpm_max')) / 100)}"
 
-    def signature_at_time(self, time):
-        # TODO
-        return TimeSignature(4, 4)
-
     def process_state(self, line):
         splitted = line.split('\t')
 
         if self.state == self.State.BEAT_INFO:
-            timesig = TimeSignature(splitted[1], splitted[2])
+            timesig = TimeSignature(int(splitted[1]), int(splitted[2]))
             self.time_sigs[Timing.from_time_str(splitted[0])] = timesig
         elif self.state == self.State.BPM:
             self.bpms[Timing(1, 1, 0)] = float(line)
@@ -303,7 +299,7 @@ class Vox:
                 laser_node.side = LaserSide.LEFT if self.state_track == 1 else LaserSide.RIGHT
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
-                if splitted[5]:
+                if len(splitted) >= 6:
                     laser_node.range = int(splitted[5])
                 laser_node = LaserNode(laser_node)
 
@@ -360,15 +356,23 @@ ver=167''', file=file)
         holds = []
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slams = []
+        current_timesig = self.time_sigs[Timing(1, 1, 0)]
+
         for m in range(self.end.measure):
             measure = m + 1
 
             # Laser range resets every measure with KSH
             laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
-            for b in range(self.signature_at_time(None).top):
+            for b in range(current_timesig.top):
                 beat = b + 1
                 for o in range(TICKS_PER_BEAT):
+                    now = Timing(measure, beat, o)
                     buffer = ''
+
+                    if now in self.time_sigs:
+                        current_timesig = self.time_sigs[now]
+                        buffer += f'time={current_timesig.top}/{current_timesig.bottom}\n'
+                        print('New timing: {}/{}'.format(current_timesig.top, current_timesig.bottom))
 
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}
@@ -508,11 +512,12 @@ argparser.add_argument('-m', '--metadata', action='store_true')
 args = argparser.parse_args()
 
 if args.testcase:
-    if not CASES[args.testcase]:
+    if not args.testcase in CASES:
         print('please specify a valid testcase', file=sys.stderr)
         print('valid testcases are:', file=sys.stderr)
         for c in CASES.keys():
             print('\t' + c, file=sys.stderr)
+        exit(1)
     vox = Vox.from_file(CASES[args.testcase])
 
     vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+") if not args.metadata else sys.stdout, metadata_only=args.metadata)

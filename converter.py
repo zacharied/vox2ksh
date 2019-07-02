@@ -12,7 +12,48 @@ TICKS_PER_BEAT = 48
 
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
+class Timing:
+    def __init__(self, measure, beat, offset):
+        self.measure = measure
+        self.beat = beat
+        self.offset = offset
+
+    @classmethod
+    def from_time_str(cls, time: str):
+        """ Create a Timing from the format string that appears in the first column of vox tracks. """
+        splitted = time.split(',')
+        if int(splitted[2]) >= TICKS_PER_BEAT:
+            raise ValueError('offset greater than maximum')
+        return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
+
+    # TODO I think most of these could be implemented better.
+    def __eq__(self, other):
+        return self.measure == other.measure and self.beat == other.beat and self.offset == other.offset
+
+    def __hash__(self):
+        return hash((self.measure, self.beat, self.offset))
+
+    def __str__(self):
+        return '{},{},{}'.format(self.measure, self.beat, self.offset)
+
+    def __cmp__(self, other):
+        if self.measure == other.measure:
+            if self.beat == other.beat:
+                return self.offset - other.offset
+            return self.beat - other.beat
+        return self.measure - other.measure
+
 class Button(Enum):
+    BT_A = auto()
+    BT_B = auto()
+    BT_C = auto()
+    BT_D = auto()
+    FX_L = auto()
+    FX_R = auto()
+
+    def is_fx(self):
+        return self == Button.FX_L or self == Button.FX_R
+
     @classmethod
     def from_track_num(cls, num: int):
         if num == 2:
@@ -28,21 +69,75 @@ class Button(Enum):
         elif num == 7:
             return cls.FX_R
         else:
-            raise ValueError('Invalid track number for button: {}'.format(num))
+            raise ValueError('invalid track number for button: {}'.format(num))
 
-    def is_fx(self):
-        return self == Button.FX_L or self == Button.FX_R
+class ButtonPress:
+    def __init__(self, time: Timing, button: Button, duration: int):
+        self.time = time
+        self.button = button
+        self.duration = duration
 
-    BT_A = auto()
-    BT_B = auto()
-    BT_C = auto()
-    BT_D = auto()
-    FX_L = auto()
-    FX_R = auto()
+LaserRangeChange = namedtuple('LaserRangeChange', 'time side range')
+
+class LaserSide(Enum):
+    LEFT = auto()
+    RIGHT = auto()
+
+    def as_letter(self):
+        return 'l' if self == LaserSide.LEFT else 'r'
+
+class LaserCont(Enum):
+    """ The continuity status of a laser node. """
+    CONTINUE = 0
+    START = 1
+    END = 2
+
+class LaserNode:
+    class Builder(dataobject):
+        time: Timing = None
+        side: LaserSide = None
+        position: int = None
+        node_type: LaserCont = None
+        range: int = 1
+
+    def __init__(self, builder: Builder):
+        self.time = builder.time
+        self.side = builder.side
+        self.position = builder.position
+        self.node_type = builder.node_type
+        self.range = builder.range
+
+    def position_ksh(self):
+        """ Convert the position from the 7-bit scale to whatever the hell KSM is using. """
+        chars = []
+        for char in range(10):
+            chars.append(chr(ord('0') + char))
+        for char in range(24):
+            chars.append(chr(ord('A') + char))
+        for char in range(15):
+            chars.append(chr(ord('a') + char))
+        idx = math.floor((self.position / 127) * (len(chars) - 1))
+        return chars[idx]
+
+class LaserSlam:
+    def __init__(self, start: LaserNode, end: LaserNode):
+        if start.time != end.time:
+            raise ValueError('start time {} differs from end time {}'.format(start.time, end.time))
+        self.start = start
+        self.end = end
+        self.time = start.time
 
 class Difficulty(Enum):
+    NOVICE = auto()
+    ADVANCED = auto()
+    EXHAUST = auto()
+    MAXIMUM = auto()
+    INFINITE = auto()
+    # TODO GRV and HVN?
+
     @classmethod
     def from_letter(cls, letter):
+        """ Derive value from the last letter of the vox filename. """
         if letter == 'n':
             return cls.NOVICE
         elif letter == 'a':
@@ -55,18 +150,20 @@ class Difficulty(Enum):
             return cls.INFINITE
         else:
             raise ValueError('invalid letter for difficulty: {}'.format(letter))
+
     def to_ksh_name(self):
+        """ Convert to a name recognized by KSM. """
         if self == self.NOVICE:
             return 'novice'
         elif self == self.ADVANCED:
             return 'advanced'
         elif self == self.EXHAUST:
             return 'extended'
+        elif self == self.MAXIMUM:
+            return 'maximum'
         elif self == self.INFINITE:
             # TODO Correct?
             return 'infinite'
-        elif self == self.MAXIMUM:
-            return 'maximum'
 
     def to_xml_name(self):
         if self == self.NOVICE:
@@ -80,14 +177,9 @@ class Difficulty(Enum):
         elif self == self.INFINITE:
             return 'infinite'
 
-    NOVICE = auto()
-    ADVANCED = auto()
-    EXHAUST = auto()
-    MAXIMUM = auto()
-    INFINITE = auto()
-
 class KshootEffect(Enum):
     def to_ksh_name(self):
+        # TODO Effect parameters
         if self == KshootEffect.RETRIGGER:
             return 'Retrigger;8'
         elif self == KshootEffect.GATE:
@@ -119,91 +211,6 @@ class KshootEffect(Enum):
     TAPESTOP = auto()
     ECHO = auto()
     SIDECHAIN = auto()
-
-class Timing:
-    def __init__(self, measure, beat, offset):
-        self.measure = measure
-        self.beat = beat
-        self.offset = offset
-
-    @classmethod
-    def from_time_str(cls, time: str):
-        splitted = time.split(',')
-        if int(splitted[2]) >= TICKS_PER_BEAT:
-            raise ValueError('Offset greater than maximum')
-        return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
-
-    def __eq__(self, other):
-        return self.measure == other.measure and self.beat == other.beat and self.offset == other.offset
-
-    def __hash__(self):
-        return hash((self.measure, self.beat, self.offset))
-
-    def __str__(self):
-        return '{},{},{}'.format(self.measure, self.beat, self.offset)
-
-    def __cmp__(self, other):
-        if self.measure == other.measure:
-            if self.beat == other.beat:
-                return self.offset - other.offset
-            return self.beat - other.beat
-        return self.measure - other.measure
-
-class ButtonPress:
-    def __init__(self, time: Timing, button: Button, duration: int):
-        self.time = time
-        self.button = button
-        self.duration = duration
-
-class LaserSide(Enum):
-    def as_letter(self):
-        return 'l' if self == LaserSide.LEFT else 'r'
-
-    LEFT = auto()
-    RIGHT = auto()
-
-class LaserCont(Enum):
-    """ The continuity status of a laser node. """
-    CONTINUE = 0
-    START = 1
-    END = 2
-
-class LaserNode:
-    class Builder(dataobject):
-        time: Timing = None
-        side: LaserSide = None
-        position: int = None
-        node_type: LaserCont = None
-        range: int = 1
-
-    def __init__(self, builder: Builder):
-        self.time = builder.time
-        self.side = builder.side
-        self.position = builder.position
-        self.node_type = builder.node_type
-        self.range = builder.range
-
-    @staticmethod
-    def kshpos(pos):
-        chars = []
-        for c in range(10):
-            chars.append(chr(ord('0') + c))
-        for c in range(24):
-            chars.append(chr(ord('A') + c))
-        for c in range(15):
-            chars.append(chr(ord('a') + c))
-        idx = math.floor((pos / 127) * (len(chars) - 1))
-        return chars[idx]
-
-class LaserSlam:
-    def __init__(self, start: LaserNode, end: LaserNode):
-        if start.time != end.time:
-            raise ValueError('start time {} differs from end time {}'.format(start.time, end.time))
-        self.start = start
-        self.end = end
-        self.time = start.time
-
-LaserRangeChange = namedtuple('LaserRangeChange', 'time side range')
 
 class Vox:
     class State(Enum):
@@ -251,11 +258,27 @@ class Vox:
         self.metadata: ElementTree = None
         self.difficulty = None
 
+    def get_metadata(self, tag, from_diff=False):
+        if from_diff:
+            the_diff = None
+            for diff in self.metadata.find('difficulty').iter():
+                if diff.tag == self.difficulty.to_xml_name():
+                    the_diff = diff
+                    break
+            if the_diff is None:
+                raise LookupError('difficulty {} not found in the `music` element'.format(self.difficulty.to_xml_name()))
+            return the_diff.find(tag).text
+        return self.metadata.find('info').find(tag).text
+
     def bpm_string(self):
         if self.get_metadata('bpm_min') == self.get_metadata('bpm_max'):
             return int(int(self.get_metadata('bpm_min')) / 100)
         else:
             return f"{int(int(self.get_metadata('bpm_min')) / 100)}-{int(int(self.get_metadata('bpm_max')) / 100)}"
+
+    def signature_at_time(self, time):
+        # TODO
+        return TimeSignature(4, 4)
 
     def process_state(self, line):
         splitted = line.split('\t')
@@ -303,22 +326,6 @@ class Vox:
             else:
                 button = Button.from_track_num(self.state_track)
                 self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1])))
-
-    def signature_at_time(self, time):
-        # TODO
-        return TimeSignature(4, 4)
-
-    def get_metadata(self, tag, from_diff=False):
-        if from_diff:
-            the_diff = None
-            for diff in self.metadata.find('difficulty').iter():
-                if diff.tag == self.difficulty.to_xml_name():
-                    the_diff = diff
-                    break
-            if the_diff is None:
-                raise LookupError('difficulty {} not found in the `music` element'.format(self.difficulty.to_xml_name()))
-            return the_diff.find(tag).text
-        return self.metadata.find('info').find(tag).text
 
 
     def as_ksh(self, file=sys.stdout, metadata_only=False):
@@ -391,7 +398,7 @@ ver=167
                             slams.append([e, 0])
 
                     # Print button state.
-                    for b in [
+                    for btn in [
                         Button.BT_A,
                         Button.BT_B,
                         Button.BT_C,
@@ -403,16 +410,16 @@ ver=167
                         no = '0'
                         hold = '2'
 
-                        if b == Button.FX_L or b == Button.FX_R:
+                        if btn == Button.FX_L or btn == Button.FX_R:
                             yes = '2'
                             hold = '1'
 
-                        if b == Button.FX_L:
+                        if btn == Button.FX_L:
                             buffer += '|'
 
-                        if b in buttons_here:
+                        if btn in buttons_here:
                             buffer += yes
-                        elif b in map(lambda h: h[0], holds):
+                        elif btn in map(lambda h: h[0], holds):
                             buffer += hold
                         else:
                             buffer += no
@@ -420,31 +427,31 @@ ver=167
                     buffer += '|'
 
                     # Now print laser state.
-                    for l in [
+                    for lsr in [
                         LaserSide.LEFT,
                         LaserSide.RIGHT
                     ]:
                         slam = None
                         laser_cancel = False
                         for s in slams:
-                            if s[0].start.side == l and (s[0].time == Timing(measure, beat, o) or s[1]):
+                            if s[0].start.side == lsr and (s[0].time == Timing(measure, beat, o) or s[1]):
                                 slam = s
                                 break
                         if slam is not None:
                             if slam[1] == 3:
-                                buffer += LaserNode.kshpos(slam[0].end.position)
+                                buffer += slam[0].end.position_ksh()
                                 slams.remove(slam)
                                 if slam[0].end.node_type == LaserCont.END:
-                                    lasers[l] = False
+                                    lasers[lsr] = False
                                     laser_cancel = True
                             else:
-                                lasers[l] = True
+                                lasers[lsr] = True
                                 slam[1] += 1
 
-                        if lasers_here[l] is not None:
-                            buffer += LaserNode.kshpos(lasers_here[l].position)
+                        if lasers_here[lsr] is not None:
+                            buffer += lasers_here[lsr].position_ksh()
                         else:
-                            if lasers[l]:
+                            if lasers[lsr]:
                                 buffer += ':'
                             elif not laser_cancel:
                                 # No laser event or ongoing laser.
@@ -453,8 +460,8 @@ ver=167
                     print(buffer, file=file)
 
                     # Subtract time remaining from holds.
-                    for h in holds:
-                        h[1] -= 1
+                    for hold in holds:
+                        hold[1] -= 1
                     holds = list(filter(lambda h: h[1] > 0, holds))
 
             print('--', file=file)
@@ -469,7 +476,6 @@ ver=167
         with open('data/music_db.xml', encoding='shift_jisx0213') as db:
             parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
             parser.metadata = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(song_id))[0]
-            parser.metadata_difficulty = next(filter(lambda d: d.tag == parser.difficulty.to_xml_name(), parser.metadata.find('difficulty')))
 
         line_no = 1
         for line in file:

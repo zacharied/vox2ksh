@@ -450,8 +450,6 @@ beat=4/4''', file=file)
 
         line_no = 1
         for line in file:
-            if line_no >= 1000:
-                break
             line = line.strip()
             if line.startswith('//'):
                 continue

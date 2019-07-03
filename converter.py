@@ -2,6 +2,7 @@ from enum import Enum, auto
 from collections import namedtuple
 from recordclass import dataobject
 from xml.etree import ElementTree
+from shutil import copyfile
 import random
 import math
 
@@ -247,6 +248,7 @@ class Vox:
         TRACK = auto()
 
     def __init__(self):
+        self.voxfile = None
         self.game_id = 0
         self.song_id = 0
         self.vox_version = 0
@@ -308,7 +310,7 @@ class Vox:
                 laser_node.side = LaserSide.LEFT if self.state_track == 1 else LaserSide.RIGHT
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
-                if splitted[5]:
+                if len(splitted) > 5:
                     laser_node.range = int(splitted[5])
                 laser_node = LaserNode(laser_node)
 
@@ -329,8 +331,12 @@ class Vox:
                     self.events.remove(slam_start)
                     self.events.append(slam)
             else:
-                button = Button.from_track_num(self.state_track)
-                self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1])))
+                try:
+                    button = Button.from_track_num(self.state_track)
+                    self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1])))
+                except ValueError as e:
+                    print('unknown track for button: ' + str(e))
+
 
 
     def as_ksh(self, file=sys.stdout, metadata_only=False):
@@ -476,38 +482,48 @@ ver=167
         parser = Vox()
 
         file = open(path, 'r')
+        parser.voxfile = file
 
         filename_array = os.path.basename(path).split('_')
-        parser.game_id = int(filename_array[0])
-        parser.song_id = int(filename_array[1])
+        try:
+            parser.game_id = int(filename_array[0])
+            parser.song_id = int(filename_array[1])
+        except ValueError as e:
+            print('malformed vox filename: ' + str(file))
         with open('data/music_db.xml', encoding='shift_jisx0213') as db:
             parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
-            parser.metadata = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))[0]
+            tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
+            if len(tree) == 0:
+                return None
+            parser.metadata = tree[0]
 
         if len(ID_TO_AUDIO) > 0:
+            if not parser.song_id in ID_TO_AUDIO:
+                return None
             print(f'Audio file for song is "{ID_TO_AUDIO[parser.song_id]}"')
         else:
             print('No audio file mapping present, skipping audio.')
 
+        return parser
+
+    def parse(self):
         line_no = 1
-        for line in file:
+        for line in self.voxfile:
             line = line.strip()
             if line.startswith('//'):
                 continue
             if line.startswith('#'):
-                token_state = cls.State.from_token(line.split('#')[1])
+                token_state = self.State.from_token(line.split('#')[1])
                 if token_state is None:
                     continue
                 if type(token_state) is tuple:
-                    parser.state = token_state[0]
-                    parser.state_track = int(token_state[1])
+                    self.state = token_state[0]
+                    self.state_track = int(token_state[1])
                 else:
-                    parser.state = token_state
-            elif parser.state is not None:
-                parser.process_state(line)
+                    self.state = token_state
+            elif self.state is not None:
+                self.process_state(line)
             line_no += 1
-
-        return parser
 
 CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
@@ -519,6 +535,7 @@ argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-m', '--metadata', action='store_true')
 argparser.add_argument('-a', '--audio-folder', default='D:\\SDVX-Extract (V0)')
 argparser.add_argument('-n', '--no-audio', action='store_true')
+argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 ID_TO_AUDIO = {}
@@ -541,6 +558,30 @@ if args.testcase:
 
     vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+") if not args.metadata else sys.stdout, metadata_only=args.metadata)
 
+    exit(0)
+elif args.convert:
+    if not os.path.exists('out'):
+        os.mkdir('out')
+    for f in os.listdir('data/vox_01_ifs'):
+        vox = Vox.from_file('data/vox_01_ifs/' + f)
+        if vox is None:
+            print(f'no audio or metadata found for {f}, skipping')
+            continue
+        chart_dir = 'out/' + str(vox.song_id)
+        if not os.path.exists(chart_dir):
+            os.mkdir(chart_dir)
+
+        if not os.path.exists(chart_dir + '/' + str(vox.song_id) + '.mp3'):
+            print(f'Copying audio for {vox.song_id}')
+            copyfile(args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id], chart_dir + '/' + str(vox.song_id) + '.mp3')
+
+        chartfile = chart_dir + '/' + vox.difficulty.to_xml_name() + '.ksh'
+        if not os.path.exists(chartfile):
+            print(f'Converting chart {vox.song_id} {vox.difficulty.name}')
+            vox.parse()
+            vox.as_ksh(file=open(chartfile, "w+"))
+        else:
+            print(f'Chart {chartfile} already exists, skipping')
     exit(0)
 
 print('Please specify something to do.')

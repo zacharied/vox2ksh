@@ -2,13 +2,17 @@ from enum import Enum, auto
 from collections import namedtuple
 from recordclass import dataobject
 from xml.etree import ElementTree
-import random
 import math
 
 import sys, os
 import argparse
 
 TICKS_PER_BEAT = 48
+
+pprint_prefix = ''
+
+def pprint(*args, **kwargs):
+    print('(' + pprint_prefix + ') '.join(map(str, args)), **kwargs)
 
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
@@ -425,14 +429,21 @@ ver=167''', file=file)
         current_timesig = self.time_sigs[Timing(1, 1, 0)]
 
         for m in range(self.end.measure):
+            # Vox measures are 1-indexed.
             measure = m + 1
 
-            # Laser range resets every measure with KSH
+            # Laser range resets every measure in ksh.
             laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
+
             for b in range(current_timesig.top):
+                # Vox beats are also 1-indexed.
                 beat = b + 1
+
                 for o in range(TICKS_PER_BEAT):
+                    # However, vox offsets are 0-indexed.
+
                     now = Timing(measure, beat, o)
+
                     buffer = ''
 
                     if now in self.time_sigs:
@@ -444,7 +455,7 @@ ver=167''', file=file)
 
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}
-                    for e in filter(lambda e: e.time == Timing(measure, beat, o), self.events):
+                    for e in filter(lambda x: x.time == Timing(measure, beat, o), self.events):
                         # Check if it's a hold first.
                         if type(e) is ButtonPress and e.duration != 0:
                             if Button.is_fx(e.button):
@@ -478,14 +489,11 @@ ver=167''', file=file)
                         Button.FX_L,
                         Button.FX_R
                     ]:
-                        yes = '1'
+                        yes = '2' if btn.is_fx() else '1'
                         no = '0'
-                        hold = '2'
+                        hold = '1' if btn.is_fx() else '2'
 
-                        if btn == Button.FX_L or btn == Button.FX_R:
-                            yes = '2'
-                            hold = '1'
-
+                        # A bar separates BT from FX.
                         if btn == Button.FX_L:
                             buffer += '|'
 

@@ -43,6 +43,81 @@ class Timing:
             return self.beat - other.beat
         return self.measure - other.measure
 
+class KshootEffect(Enum):
+    def to_ksh_name(self, params):
+        if self == KshootEffect.RETRIGGER:
+            division = params['division'] or 8
+            return f'Retrigger;{division}'
+
+        elif self == KshootEffect.GATE:
+            division = params['division'] or 8
+            return f'Gate;{division}'
+
+        elif self == KshootEffect.FLANGER:
+            return 'Flanger'
+
+        elif self == KshootEffect.BITCRUSHER:
+            degree = params['degree'] or 10
+            return f'BitCrusher;{degree}'
+
+        elif self == KshootEffect.PHASER:
+            return 'Phaser'
+
+        elif self == KshootEffect.WOBBLE:
+            division = params['division'] or 12
+            return f'Wobble;{division}'
+
+        elif self == KshootEffect.PITCHSHIFT:
+            tones = params['tones'] or 12
+            return f'PitchShift;{tones}'
+
+        elif self == KshootEffect.TAPESTOP:
+            speed = params['speed'] or 50
+            return f'TapeStop;{speed}'
+
+        elif self == KshootEffect.ECHO:
+            # TODO Figure out echo parameters.
+            x = params['x'] or 4
+            y = params['y'] or 60
+            return f'Echo;{x};{y}'
+
+        elif self == KshootEffect.SIDECHAIN:
+            return 'SideChain'
+
+    @classmethod
+    def from_pre_v4_vox_sound_id(cls, sound_id):
+        if sound_id < 2:
+            if sound_id == 1:
+                print('A chart used 0bt_2mix. Please make sure the chart was "pulse_laser_higedriver_1n".')
+            return None
+        elif sound_id == 2:
+            return cls.RETRIGGER, {"division": 8}
+        elif sound_id == 3:
+            return cls.RETRIGGER, {"division": 16}
+        elif sound_id == 4:
+            return cls.GATE, {"division": 16}
+        elif sound_id == 5:
+            return cls.FLANGER
+        elif sound_id == 6:
+            return cls.RETRIGGER, {"division": 32}
+        elif sound_id == 7:
+            return cls.GATE, {"division": 8}
+        elif sound_id == 8:
+            return cls.PITCHSHIFT
+        else:
+            raise ValueError(f'Pre-v4 vox sound id {sound_id} does not exist.')
+
+    RETRIGGER = auto()
+    GATE = auto()
+    FLANGER = auto()
+    BITCRUSHER = auto()
+    PHASER = auto()
+    WOBBLE = auto()
+    PITCHSHIFT = auto()
+    TAPESTOP = auto()
+    ECHO = auto()
+    SIDECHAIN = auto()
+
 class Button(Enum):
     BT_A = auto()
     BT_B = auto()
@@ -72,10 +147,11 @@ class Button(Enum):
             raise ValueError('invalid track number for button: {}'.format(num))
 
 class ButtonPress:
-    def __init__(self, time: Timing, button: Button, duration: int):
+    def __init__(self, time: Timing, button: Button, duration: int, effect: (KshootEffect, dict)):
         self.time = time
         self.button = button
         self.duration = duration
+        self.effect = effect
 
 LaserRangeChange = namedtuple('LaserRangeChange', 'time side range')
 
@@ -177,40 +253,11 @@ class Difficulty(Enum):
         elif self == self.INFINITE:
             return 'infinite'
 
-class KshootEffect(Enum):
-    def to_ksh_name(self):
-        # TODO Effect parameters
-        if self == KshootEffect.RETRIGGER:
-            return 'Retrigger;8'
-        elif self == KshootEffect.GATE:
-            return 'Gate;8'
-        elif self == KshootEffect.FLANGER:
-            return 'Flanger'
-        elif self == KshootEffect.BITCRUSHER:
-            return 'BitCrusher;10'
-        elif self == KshootEffect.PHASER:
-            return 'Phaser'
-        elif self == KshootEffect.WOBBLE:
-            return 'Wobble;12'
-        elif self == KshootEffect.PITCHSHIFT:
-            return 'PitchShift;12'
-        elif self == KshootEffect.TAPESTOP:
-            return 'TapeStop;50'
-        elif self == KshootEffect.ECHO:
-            return 'Echo;4;60'
-        elif self == KshootEffect.SIDECHAIN:
-            return 'SideChain'
 
-    RETRIGGER = auto()
-    GATE = auto()
-    FLANGER = auto()
-    BITCRUSHER = auto()
-    PHASER = auto()
-    WOBBLE = auto()
-    PITCHSHIFT = auto()
-    TAPESTOP = auto()
-    ECHO = auto()
-    SIDECHAIN = auto()
+class ParserError(Exception):
+    """ Exception raised when the Vox parser encounters invalid syntax. """
+    def __init__(self, message, filename, line):
+        super().__init__(f'({filename}:{str(line)} {message}')
 
 class Vox:
     class State(Enum):
@@ -250,6 +297,7 @@ class Vox:
         self.game_id = 0
         self.song_id = 0
         self.vox_version = 0
+        self.defines = {}
         self.time_sigs = {}
         self.bpms = {}
         self.end = None
@@ -279,7 +327,7 @@ class Vox:
         else:
             return f"{int(int(self.get_metadata('bpm_min')) / 100)}-{int(int(self.get_metadata('bpm_max')) / 100)}"
 
-    def process_state(self, line):
+    def process_state(self, line, filename=None, line_no=None):
         splitted = line.split('\t')
 
         if self.state == self.State.FORMAT_VERSION:
@@ -295,8 +343,7 @@ class Vox:
         elif self.state == self.State.END_POSITION:
             self.end = Timing.from_time_str(line)
         elif self.state == self.State.SOUND_ID:
-            # TODO Figure this out.
-            pass
+            raise ParserError('non-define line encountered in SOUND ID', filename, line_no)
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:
                 laser_node = LaserNode.Builder()
@@ -326,7 +373,21 @@ class Vox:
                     self.events.append(slam)
             else:
                 button = Button.from_track_num(self.state_track)
-                self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1])))
+                fx_data = None
+                if button.is_fx():
+                    # Process effect assignment.
+                    if self.vox_version < 4:
+                        sound_id = int(splitted[3]) if splitted[3].isdigit() else int(self.defines[splitted[3]])
+                        fx_res = KshootEffect.from_pre_v4_vox_sound_id(sound_id)
+                        if type(fx_res) is tuple:
+                            fx_data = (fx_res[0], fx_res[1])
+                        else:
+                            fx_data = (fx_res, None)
+                    else:
+                        print('FX parsing for vox version > 3 not implemented')
+                        pass
+
+                self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1]), fx_data))
 
     def as_ksh(self, file=sys.stdout, metadata_only=False):
         # First print metadata.
@@ -387,8 +448,9 @@ ver=167''', file=file)
                         # Check if it's a hold first.
                         if type(e) is ButtonPress and e.duration != 0:
                             if Button.is_fx(e.button):
+                                letter = 'l' if e.button == Button.FX_L else 'r'
                                 # Assign random FX to FX hold.
-                                buffer += 'fx-{}={}\n'.format('l' if e.button == Button.FX_L else 'r', random.choice(list(KshootEffect)).to_ksh_name())
+                                buffer += f'fx-{letter}={e.effect[0].to_ksh_name(e.effect[1])}\n'
                             holds.append([e.button, e.duration])
                         elif type(e) is ButtonPress:
                             buttons_here.append(e.button)
@@ -508,8 +570,18 @@ ver=167''', file=file)
                     parser.state_track = int(token_state[1])
                 else:
                     parser.state = token_state
+            elif line.startswith('define'):
+                splitted = line.split('\t')
+
+                # Sanity check.
+                if splitted[0] != 'define':
+                    raise ParserError('illegal define line in SOUND ID', file, line_no)
+                if len(splitted) != 3:
+                    raise ParserError('illegal number of operands in define statement', file, line_no)
+
+                parser.defines[splitted[1]] = splitted[2]
             elif parser.state is not None:
-                parser.process_state(line)
+                parser.process_state(line, filename=os.path.basename(path), line_no=line_no)
             line_no += 1
 
         return parser
@@ -517,7 +589,8 @@ ver=167''', file=file)
 CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
     'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox',
-    'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox'
+    'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox',
+    'early-version': 'data/vox_01_ifs/001_0001_albida_muryoku_1n.vox'
 }
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')

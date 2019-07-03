@@ -247,6 +247,9 @@ class Vox:
         TRACK = auto()
 
     def __init__(self):
+        self.game_id = 0
+        self.song_id = 0
+        self.vox_version = 0
         self.time_sigs = {}
         self.bpms = {}
         self.end = None
@@ -283,7 +286,9 @@ class Vox:
     def process_state(self, line):
         splitted = line.split('\t')
 
-        if self.state == self.State.BEAT_INFO:
+        if self.state == self.State.FORMAT_VERSION:
+            self.vox_version = int(line)
+        elif self.state == self.State.BEAT_INFO:
             timesig = TimeSignature(splitted[1], splitted[2])
             self.time_sigs[Timing.from_time_str(splitted[0])] = timesig
         elif self.state == self.State.BPM:
@@ -314,7 +319,7 @@ class Vox:
                 slam_start = None
                 for e in self.events:
                     if type(e) is LaserNode and e.side == laser_node.side and e.time == laser_node.time:
-                        # We're gonna remove the laser node and replace  it with a slam node.
+                        # We're gonna remove the laser node and replace it with a slam node.
                         slam_start = e
                         break
                 if slam_start is None:
@@ -339,7 +344,7 @@ illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
-m=test.mp3
+m={self.song_id}.mp3
 mvol={self.get_metadata('volume')}
 o=0
 bg=desert
@@ -472,10 +477,17 @@ ver=167
 
         file = open(path, 'r')
 
-        song_id = int(os.path.basename(path).split('_')[1])
+        filename_array = os.path.basename(path).split('_')
+        parser.game_id = int(filename_array[0])
+        parser.song_id = int(filename_array[1])
         with open('data/music_db.xml', encoding='shift_jisx0213') as db:
             parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
-            parser.metadata = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(song_id))[0]
+            parser.metadata = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))[0]
+
+        if len(ID_TO_AUDIO) > 0:
+            print(f'Audio file for song is "{ID_TO_AUDIO[parser.song_id]}"')
+        else:
+            print('No audio file mapping present, skipping audio.')
 
         line_no = 1
         for line in file:
@@ -505,7 +517,19 @@ CASES = {
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-m', '--metadata', action='store_true')
+argparser.add_argument('-a', '--audio-folder', default='D:\\SDVX-Extract (V0)')
+argparser.add_argument('-n', '--no-audio', action='store_true')
 args = argparser.parse_args()
+
+ID_TO_AUDIO = {}
+
+if not args.no_audio:
+    print('Generating audio file mapping...')
+    # Audio files should have a name starting with the ID followed by a space.
+    for _, _, files in os.walk(args.audio_folder):
+        for f in files:
+            ID_TO_AUDIO[int(os.path.basename(f).split(' ')[0])] = f
+    print(f'{len(ID_TO_AUDIO)} songs processed.')
 
 if args.testcase:
     if not CASES[args.testcase]:

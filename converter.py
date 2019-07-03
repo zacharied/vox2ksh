@@ -281,17 +281,13 @@ class Vox:
         else:
             return f"{int(int(self.get_metadata('bpm_min')) / 100)}-{int(int(self.get_metadata('bpm_max')) / 100)}"
 
-    def signature_at_time(self, time):
-        # TODO
-        return TimeSignature(4, 4)
-
     def process_state(self, line):
         splitted = line.split('\t')
 
         if self.state == self.State.FORMAT_VERSION:
             self.vox_version = int(line)
         elif self.state == self.State.BEAT_INFO:
-            timesig = TimeSignature(splitted[1], splitted[2])
+            timesig = TimeSignature(int(splitted[1]), int(splitted[2]))
             self.time_sigs[Timing.from_time_str(splitted[0])] = timesig
         elif self.state == self.State.BPM:
             self.bpms[Timing(1, 1, 0)] = float(line)
@@ -338,7 +334,6 @@ class Vox:
                     print('unknown track for button: ' + str(e))
 
 
-
     def as_ksh(self, file=sys.stdout, metadata_only=False):
         # First print metadata.
         # TODO song file, preview, chokkaku, yomigana titles(?), background
@@ -361,26 +356,36 @@ pfiltergain=50
 filtertype=peak
 chokkakuautovol=0
 chokkakuvol=50
-ver=167
---
-''', file=file)
+ver=167''', file=file)
 
         if metadata_only:
             return
+
+        print('--', file=file)
 
         # Holds come in the pair <button>,<duration>
         holds = []
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slams = []
+        current_timesig = self.time_sigs[Timing(1, 1, 0)]
+
         for m in range(self.end.measure):
             measure = m + 1
 
             # Laser range resets every measure with KSH
             laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
-            for b in range(self.signature_at_time(None).top):
+            for b in range(current_timesig.top):
                 beat = b + 1
                 for o in range(TICKS_PER_BEAT):
+                    now = Timing(measure, beat, o)
                     buffer = ''
+
+                    if now in self.time_sigs:
+                        current_timesig = self.time_sigs[now]
+                        buffer += f'time={current_timesig.top}/{current_timesig.bottom}\n'
+
+                    if now in self.bpms:
+                        buffer += f't={str(self.bpms[now]).rstrip("0").rstrip(".")}\n'
 
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}
@@ -527,7 +532,8 @@ ver=167
 
 CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
-    'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox'
+    'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox',
+    'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox'
 }
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
@@ -549,11 +555,12 @@ if not args.no_audio:
     print(f'{len(ID_TO_AUDIO)} songs processed.')
 
 if args.testcase:
-    if not CASES[args.testcase]:
+    if not args.testcase in CASES:
         print('please specify a valid testcase', file=sys.stderr)
         print('valid testcases are:', file=sys.stderr)
         for c in CASES.keys():
             print('\t' + c, file=sys.stderr)
+        exit(1)
     vox = Vox.from_file(CASES[args.testcase])
 
     vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+") if not args.metadata else sys.stdout, metadata_only=args.metadata)

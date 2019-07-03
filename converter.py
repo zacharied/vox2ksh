@@ -175,6 +175,18 @@ class Difficulty(Enum):
         elif self == self.INFINITE:
             return 'infinite'
 
+    def to_jacket_ifs_numer(self):
+        if self == self.NOVICE:
+            return 1
+        elif self == self.ADVANCED:
+            return 2
+        elif self == self.EXHAUST:
+            return 3
+        elif self == self.MAXIMUM:
+            return 4
+        else:
+            return 5
+
 class KshootEffect(Enum):
     def to_ksh_name(self):
         # TODO Effect parameters
@@ -337,7 +349,7 @@ class Vox:
         print(f'''title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
-jacket=.jpg
+jacket={self.difficulty.to_jacket_ifs_numer()}.png
 illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
@@ -537,18 +549,24 @@ argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-m', '--metadata', action='store_true')
 argparser.add_argument('-a', '--audio-folder', default='D:\\SDVX-Extract (V0)')
-argparser.add_argument('-n', '--no-audio', action='store_true')
+argparser.add_argument('-j', '--jacket-folder', default='D:\\SDVX-Extract (jk)')
+argparser.add_argument('-n', '--no-extra', action='store_true')
 argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 ID_TO_AUDIO = {}
 
-if not args.no_audio:
+if not args.no_extra:
     print('Generating audio file mapping...')
     # Audio files should have a name starting with the ID followed by a space.
     for _, _, files in os.walk(args.audio_folder):
         for f in files:
-            ID_TO_AUDIO[int(os.path.basename(f).split(' ')[0])] = f
+            if os.path.basename(f) == 'jk':
+                continue
+            try:
+                ID_TO_AUDIO[int(os.path.basename(f).split(' ')[0])] = f
+            except ValueError as e:
+                print(e)
     print(f'{len(ID_TO_AUDIO)} songs processed.')
 
 if args.testcase:
@@ -585,6 +603,12 @@ elif args.convert:
             vox.parse()
             with open(chartfile, "w+", encoding='utf-8') as file:
                 vox.as_ksh(file=file)
+
+            jacket_filename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+            jacket_path = args.jacket_folder + '/' + jacket_filename + '_ifs/tex/' + jacket_filename + '.png'
+            if os.path.exists(jacket_path):
+                print('> Found jacket at ' + jacket_path)
+                copyfile(jacket_path, chart_dir + '/' + str(vox.difficulty.to_jacket_ifs_numer()) + '.png')
         else:
             print(f'Chart {chartfile} already exists, skipping')
     exit(0)

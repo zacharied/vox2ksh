@@ -326,6 +326,7 @@ class Vox:
         return self.metadata.find('info').find(tag).text
 
     def bpm_string(self):
+        # TODO Make sure decimal BPM's are okay.
         if self.get_metadata('bpm_min') == self.get_metadata('bpm_max'):
             return int(int(self.get_metadata('bpm_min')) / 100)
         else:

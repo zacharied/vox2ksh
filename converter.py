@@ -157,13 +157,10 @@ class Difficulty(Enum):
         if self == self.NOVICE:
             return 'novice'
         elif self == self.ADVANCED:
-            return 'advanced'
+            return 'challenge'
         elif self == self.EXHAUST:
             return 'extended'
-        elif self == self.MAXIMUM:
-            return 'maximum'
-        elif self == self.INFINITE:
-            # TODO Correct?
+        elif self == self.MAXIMUM or self == self.INFINITE:
             return 'infinite'
 
     def to_xml_name(self):

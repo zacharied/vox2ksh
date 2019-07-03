@@ -586,7 +586,8 @@ elif args.convert:
         if not os.path.exists(chartfile):
             print(f'Converting chart {vox.song_id} {vox.difficulty.name}')
             vox.parse()
-            vox.as_ksh(file=open(chartfile, "w+"))
+            with open(chartfile, "w+", encoding='utf-8') as file:
+                vox.as_ksh(file=file)
         else:
             print(f'Chart {chartfile} already exists, skipping')
     exit(0)

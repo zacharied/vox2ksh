@@ -3,6 +3,7 @@ from collections import namedtuple
 from recordclass import dataobject
 from xml.etree import ElementTree
 from shutil import copyfile
+import traceback
 import random
 import math
 
@@ -12,6 +13,17 @@ import argparse
 TICKS_PER_BEAT = 48
 
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
+
+class VoxNameError(Exception):
+    pass
+class MetadataFindError(Exception):
+    pass
+class AudioFileFindError(Exception):
+    pass
+class LaserNodeFormatError(Exception):
+    pass
+class ButtonEventError(Exception):
+    pass
 
 class Timing:
     def __init__(self, measure, beat, offset):
@@ -129,11 +141,11 @@ class LaserSlam:
         self.time = start.time
 
 class Difficulty(Enum):
-    NOVICE = auto()
-    ADVANCED = auto()
-    EXHAUST = auto()
-    MAXIMUM = auto()
-    INFINITE = auto()
+    NOVICE = 0
+    ADVANCED = 1
+    EXHAUST = 2
+    MAXIMUM = 3
+    INFINITE = 4
     # TODO GRV and HVN?
 
     @classmethod
@@ -320,7 +332,7 @@ class Vox:
                 laser_node = LaserNode(laser_node)
 
                 if laser_node.position > 127 or laser_node.position < 0:
-                    raise ValueError('laser position out of bounds: {}'.format(laser_node.position))
+                    raise LaserNodeFormatError(f'position {laser_node.position} is out of bounds')
 
                 # Check if it's a slam.
                 slam_start = None
@@ -339,17 +351,19 @@ class Vox:
                 try:
                     button = Button.from_track_num(self.state_track)
                     self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1])))
-                except ValueError as e:
-                    print('unknown track for button: ' + str(e))
+                except ValueError:
+                    raise ButtonEventError(f'{self.state_track} is an invalid button track')
 
 
-    def as_ksh(self, file=sys.stdout, metadata_only=False):
+    def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True):
         # First print metadata.
         # TODO song file, preview, chokkaku, yomigana titles(?), background
+        if jacket_idx is None:
+            jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
         print(f'''title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
-jacket={self.difficulty.to_jacket_ifs_numer()}.png
+jacket={jacket_idx}.png
 illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
@@ -378,7 +392,12 @@ ver=167''', file=file)
         slams = []
         current_timesig = self.time_sigs[Timing(1, 1, 0)]
 
-        for m in range(self.end.measure):
+        measure_iter = range(self.end.measure)
+        if progress_bar:
+            from tqdm import tqdm
+            measure_iter = tqdm(measure_iter, unit='measure', leave=False)
+
+        for m in measure_iter:
             measure = m + 1
 
             # Laser range resets every measure with KSH
@@ -499,24 +518,25 @@ ver=167''', file=file)
         parser.voxfile = file
 
         filename_array = os.path.basename(path).split('_')
-        try:
-            parser.game_id = int(filename_array[0])
-            parser.song_id = int(filename_array[1])
-        except ValueError as e:
-            print('malformed vox filename: ' + str(file))
         with open('data/music_db.xml', encoding='shift_jisx0213') as db:
-            parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+            try:
+                parser.game_id = int(filename_array[0])
+                parser.song_id = int(filename_array[1])
+                parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+            except ValueError:
+                raise VoxNameError(f'unable to parse file name "{path}"')
+
             tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
+
             if len(tree) == 0:
-                return None
+                raise MetadataFindError(f'unable to find metadata for song {parser.song_id}')
+
             parser.metadata = tree[0]
 
         if len(ID_TO_AUDIO) > 0:
             if not parser.song_id in ID_TO_AUDIO:
-                return None
-            print(f'Audio file for song is "{ID_TO_AUDIO[parser.song_id]}"')
-        else:
-            print('No audio file mapping present, skipping audio.')
+                raise AudioFileFindError(f'unable to find audio file for song {parser.song_id}')
+        # else we chose to skip audio.
 
         return parser
 
@@ -582,35 +602,80 @@ if args.testcase:
 
     exit(0)
 elif args.convert:
+    # Create output directory.
     if not os.path.exists('out'):
+        print(f'Creating output directory.')
         os.mkdir('out')
+
+    # Load source directory.
     for f in os.listdir('data/vox_01_ifs'):
-        vox = Vox.from_file('data/vox_01_ifs/' + f)
-        if vox is None:
-            print(f'no audio or metadata found for {f}, skipping')
+        vox_path = 'data/vox_01_ifs/' + f
+        print(vox_path + ':')
+        try:
+            vox = Vox.from_file(vox_path)
+        except (VoxNameError, MetadataFindError, AudioFileFindError) as e:
+            print(f'> Skipping file "{vox_path}": {e}')
             continue
-        chart_dir = 'out/' + str(vox.song_id)
-        if not os.path.exists(chart_dir):
-            os.mkdir(chart_dir)
 
-        if not os.path.exists(chart_dir + '/' + str(vox.song_id) + '.mp3'):
-            print(f'Copying audio for {vox.song_id}')
-            copyfile(args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id], chart_dir + '/' + str(vox.song_id) + '.mp3')
+        print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
 
-        chartfile = chart_dir + '/' + vox.difficulty.to_xml_name() + '.ksh'
-        if not os.path.exists(chartfile):
-            print(f'Converting chart {vox.song_id} {vox.difficulty.name}')
+        # First try to parse the file.
+        try:
             vox.parse()
-            with open(chartfile, "w+", encoding='utf-8') as file:
-                vox.as_ksh(file=file)
+        except Exception as e:
+            print('> Parsing vox file failed with ' + str(e))
+            continue
 
-            jacket_filename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-            jacket_path = args.jacket_folder + '/' + jacket_filename + '_ifs/tex/' + jacket_filename + '.png'
-            if os.path.exists(jacket_path):
-                print('> Found jacket at ' + jacket_path)
-                copyfile(jacket_path, chart_dir + '/' + str(vox.difficulty.to_jacket_ifs_numer()) + '.png')
+        game_dir = f'out/{str(vox.game_id).zfill(3)}'
+        if not os.path.isdir(game_dir):
+            print(f'> Making game directory "{game_dir}".')
+            os.mkdir(game_dir)
+        song_dir = f'{game_dir}/{vox.get_metadata("ascii")}'
+        if not os.path.isdir(song_dir):
+            print(f'> Creating song directory "{song_dir}".')
+            os.mkdir(song_dir)
+
+        target_audio_path = song_dir + '/track.mp3'
+        if not os.path.exists(target_audio_path):
+            src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
+            print(f'> Copying audio file {src_audio_path} to song directory.')
+            copyfile(src_audio_path, target_audio_path)
         else:
-            print(f'Chart {chartfile} already exists, skipping')
+            print(f'> Audio file "{target_audio_path}" already exists.')
+
+        src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+        src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+
+        fallback_jacket_diff_idx = None
+        if os.path.exists(src_jacket_path):
+            target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+            print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+            copyfile(src_jacket_path, target_jacket_path)
+        else:
+            print(f'> Could not find jacket image file. Checking easier diffs.')
+            fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+            while True:
+                if fallback_jacket_diff_idx < 0:
+                    print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                    fallback_jacket_diff_idx = ''
+                    break
+
+                easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
+                if os.path.exists(easier_jacket_path):
+                    # We found the diff number with the jacket.
+                    print(f'> Using jacket "{easier_jacket_path}".')
+                    break
+                fallback_jacket_diff_idx -= 1
+
+        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+        print(f'> Writing KSH data to "{chart_path}".')
+        with open(chart_path, "w+", encoding='utf-8') as ksh_file:
+            try:
+                vox.as_ksh(file=ksh_file, jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None)
+            except Exception as e:
+                print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
+                continue
+            print('> Success!')
     exit(0)
 
 print('Please specify something to do.')

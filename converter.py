@@ -368,7 +368,7 @@ illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
-m={self.song_id}.mp3
+m=track.mp3
 mvol={self.get_metadata('volume')}
 o=0
 bg=desert
@@ -576,6 +576,15 @@ args = argparser.parse_args()
 
 ID_TO_AUDIO = {}
 
+class Failures(dataobject):
+    filename_parse_error = []
+    vox_parse_error = []
+    ksh_output_error = []
+    no_metadata = []
+    no_audio = []
+
+failures = Failures()
+
 if not args.no_extra:
     print('Generating audio file mapping...')
     # Audio files should have a name starting with the ID followed by a space.
@@ -615,6 +624,12 @@ elif args.convert:
             vox = Vox.from_file(vox_path)
         except (VoxNameError, MetadataFindError, AudioFileFindError) as e:
             print(f'> Skipping file "{vox_path}": {e}')
+            if type(e) is VoxNameError:
+                failures.filename_parse_error.append((vox_path, e))
+            elif type(e) is MetadataFindError:
+                failures.no_metadata.append((vox_path, e))
+            elif type(e) is AudioFileFindError:
+                failures.no_audio.append((vox_path, e))
             continue
 
         print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
@@ -624,6 +639,7 @@ elif args.convert:
             vox.parse()
         except Exception as e:
             print('> Parsing vox file failed with ' + str(e))
+            failures.vox_parse_error.append((vox.song_id, e))
             continue
 
         game_dir = f'out/{str(vox.game_id).zfill(3)}'
@@ -674,6 +690,7 @@ elif args.convert:
                 vox.as_ksh(file=ksh_file, jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None)
             except Exception as e:
                 print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
+                failures.ksh_output_error.append((vox.song_id, e))
                 continue
             print('> Success!')
     exit(0)

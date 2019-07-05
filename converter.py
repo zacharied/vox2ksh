@@ -2,6 +2,9 @@ from enum import Enum, auto
 from collections import namedtuple
 from recordclass import dataobject
 from xml.etree import ElementTree
+from shutil import copyfile
+import traceback
+import random
 import math
 
 import sys, os
@@ -15,6 +18,17 @@ def pprint(*args, **kwargs):
     print('(' + pprint_prefix + ') '.join(map(str, args)), **kwargs)
 
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
+
+class VoxNameError(Exception):
+    pass
+class MetadataFindError(Exception):
+    pass
+class AudioFileFindError(Exception):
+    pass
+class LaserNodeFormatError(Exception):
+    pass
+class ButtonEventError(Exception):
+    pass
 
 class Timing:
     def __init__(self, measure, beat, offset):
@@ -208,11 +222,11 @@ class LaserSlam:
         self.time = start.time
 
 class Difficulty(Enum):
-    NOVICE = auto()
-    ADVANCED = auto()
-    EXHAUST = auto()
-    MAXIMUM = auto()
-    INFINITE = auto()
+    NOVICE = 0
+    ADVANCED = 1
+    EXHAUST = 2
+    MAXIMUM = 3
+    INFINITE = 4
     # TODO GRV and HVN?
 
     @classmethod
@@ -236,13 +250,10 @@ class Difficulty(Enum):
         if self == self.NOVICE:
             return 'novice'
         elif self == self.ADVANCED:
-            return 'advanced'
+            return 'challenge'
         elif self == self.EXHAUST:
             return 'extended'
-        elif self == self.MAXIMUM:
-            return 'maximum'
-        elif self == self.INFINITE:
-            # TODO Correct?
+        elif self == self.MAXIMUM or self == self.INFINITE:
             return 'infinite'
 
     def to_xml_name(self):
@@ -257,6 +268,41 @@ class Difficulty(Enum):
         elif self == self.INFINITE:
             return 'infinite'
 
+    def to_jacket_ifs_numer(self):
+        if self == self.NOVICE:
+            return 1
+        elif self == self.ADVANCED:
+            return 2
+        elif self == self.EXHAUST:
+            return 3
+        elif self == self.MAXIMUM:
+            return 4
+        else:
+            return 5
+
+class KshootEffect(Enum):
+    def to_ksh_name(self):
+        # TODO Effect parameters
+        if self == KshootEffect.RETRIGGER:
+            return 'Retrigger;8'
+        elif self == KshootEffect.GATE:
+            return 'Gate;8'
+        elif self == KshootEffect.FLANGER:
+            return 'Flanger'
+        elif self == KshootEffect.BITCRUSHER:
+            return 'BitCrusher;10'
+        elif self == KshootEffect.PHASER:
+            return 'Phaser'
+        elif self == KshootEffect.WOBBLE:
+            return 'Wobble;12'
+        elif self == KshootEffect.PITCHSHIFT:
+            return 'PitchShift;12'
+        elif self == KshootEffect.TAPESTOP:
+            return 'TapeStop;50'
+        elif self == KshootEffect.ECHO:
+            return 'Echo;4;60'
+        elif self == KshootEffect.SIDECHAIN:
+            return 'SideChain'
 
 class ParserError(Exception):
     """ Exception raised when the Vox parser encounters invalid syntax. """
@@ -298,6 +344,7 @@ class Vox:
         TRACK = auto()
 
     def __init__(self):
+        self.voxfile = None
         self.game_id = 0
         self.song_id = 0
         self.vox_version = 0
@@ -356,12 +403,12 @@ class Vox:
                 laser_node.side = LaserSide.LEFT if self.state_track == 1 else LaserSide.RIGHT
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
-                if len(splitted) >= 6:
+                if len(splitted) > 5:
                     laser_node.range = int(splitted[5])
                 laser_node = LaserNode(laser_node)
 
                 if laser_node.position > 127 or laser_node.position < 0:
-                    raise ValueError('laser position out of bounds: {}'.format(laser_node.position))
+                    raise LaserNodeFormatError(f'position {laser_node.position} is out of bounds')
 
                 # Check if it's a slam.
                 slam_start = None
@@ -377,30 +424,36 @@ class Vox:
                     self.events.remove(slam_start)
                     self.events.append(slam)
             else:
-                button = Button.from_track_num(self.state_track)
-                fx_data = None
-                if button.is_fx():
-                    # Process effect assignment.
-                    if self.vox_version < 4:
-                        sound_id = int(splitted[3]) if splitted[3].isdigit() else int(self.defines[splitted[3]])
-                        fx_res = KshootEffect.from_pre_v4_vox_sound_id(sound_id)
-                        if type(fx_res) is tuple:
-                            fx_data = (fx_res[0], fx_res[1])
+                try:
+                    button = Button.from_track_num(self.state_track)
+                    fx_data = None
+                    if button.is_fx():
+                        # Process effect assignment.
+                        if self.vox_version < 4:
+                            sound_id = int(splitted[3]) if splitted[3].isdigit() else int(self.defines[splitted[3]])
+                            fx_res = KshootEffect.from_pre_v4_vox_sound_id(sound_id)
+                            if type(fx_res) is tuple:
+                                fx_data = (fx_res[0], fx_res[1])
+                            else:
+                                fx_data = (fx_res, None)
                         else:
-                            fx_data = (fx_res, None)
-                    else:
-                        print('FX parsing for vox version > 3 not implemented')
-                        pass
+                            print('FX parsing for vox version > 3 not implemented')
+                            pass
 
-                self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1]), fx_data))
+                    self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1]), fx_data))
+                except ValueError:
+                    raise ButtonEventError(f'{self.state_track} is an invalid button track')
 
-    def as_ksh(self, file=sys.stdout, metadata_only=False):
+
+    def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True):
         # First print metadata.
         # TODO song file, preview, chokkaku, yomigana titles(?), background
+        if jacket_idx is None:
+            jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
         print(f'''title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
-jacket=.jpg
+jacket={jacket_idx}.png
 illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
@@ -429,8 +482,12 @@ ver=167''', file=file)
         slams = []
         current_timesig = self.time_sigs[Timing(1, 1, 0)]
 
-        for m in range(self.end.measure):
-            # Vox measures are 1-indexed.
+        measure_iter = range(self.end.measure)
+        if progress_bar:
+            from tqdm import tqdm
+            measure_iter = tqdm(measure_iter, unit='measure', leave=False)
+
+        for m in measure_iter:
             measure = m + 1
 
             # Laser range resets every measure in ksh.
@@ -552,48 +609,59 @@ ver=167''', file=file)
         parser = Vox()
 
         file = open(path, 'r')
+        parser.voxfile = file
 
         filename_array = os.path.basename(path).split('_')
-        parser.game_id = int(filename_array[0])
-        parser.song_id = int(filename_array[1])
         with open('data/music_db.xml', encoding='shift_jisx0213') as db:
-            parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
-            parser.metadata = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))[0]
+            try:
+                parser.game_id = int(filename_array[0])
+                parser.song_id = int(filename_array[1])
+                parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+            except ValueError:
+                raise VoxNameError(f'unable to parse file name "{path}"')
+
+            tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
+
+            if len(tree) == 0:
+                raise MetadataFindError(f'unable to find metadata for song {parser.song_id}')
+
+            parser.metadata = tree[0]
 
         if len(ID_TO_AUDIO) > 0:
-            print(f'Audio file for song is "{ID_TO_AUDIO[parser.song_id]}"')
-        else:
-            print('No audio file mapping present, skipping audio.')
+            if not parser.song_id in ID_TO_AUDIO:
+                raise AudioFileFindError(f'unable to find audio file for song {parser.song_id}')
+        # else we chose to skip audio.
 
+        return parser
+
+    def parse(self):
         line_no = 1
-        for line in file:
+        for line in self.voxfile:
             line = line.strip()
             if line.startswith('//'):
                 continue
             if line.startswith('#'):
-                token_state = cls.State.from_token(line.split('#')[1])
+                token_state = self.State.from_token(line.split('#')[1])
                 if token_state is None:
                     continue
                 if type(token_state) is tuple:
-                    parser.state = token_state[0]
-                    parser.state_track = int(token_state[1])
+                    self.state = token_state[0]
+                    self.state_track = int(token_state[1])
                 else:
-                    parser.state = token_state
+                    self.state = token_state
             elif line.startswith('define'):
                 splitted = line.split('\t')
 
                 # Sanity check.
                 if splitted[0] != 'define':
-                    raise ParserError('illegal define line in SOUND ID', file, line_no)
+                    raise ParserError('illegal define line in SOUND ID', self.voxfile, line_no)
                 if len(splitted) != 3:
-                    raise ParserError('illegal number of operands in define statement', file, line_no)
+                    raise ParserError('illegal number of operands in define statement', self.voxfile, line_no)
 
-                parser.defines[splitted[1]] = splitted[2]
-            elif parser.state is not None:
-                parser.process_state(line, filename=os.path.basename(path), line_no=line_no)
+                self.defines[splitted[1]] = splitted[2]
+            elif self.state is not None:
+                self.process_state(line)
             line_no += 1
-
-        return parser
 
 CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
@@ -606,17 +674,24 @@ argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-m', '--metadata', action='store_true')
 argparser.add_argument('-a', '--audio-folder', default='D:\\SDVX-Extract (V0)')
-argparser.add_argument('-n', '--no-audio', action='store_true')
+argparser.add_argument('-j', '--jacket-folder', default='D:\\SDVX-Extract (jk)')
+argparser.add_argument('-n', '--no-extra', action='store_true')
+argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 ID_TO_AUDIO = {}
 
-if not args.no_audio:
+if not args.no_extra:
     print('Generating audio file mapping...')
     # Audio files should have a name starting with the ID followed by a space.
     for _, _, files in os.walk(args.audio_folder):
         for f in files:
-            ID_TO_AUDIO[int(os.path.basename(f).split(' ')[0])] = f
+            if os.path.basename(f) == 'jk':
+                continue
+            try:
+                ID_TO_AUDIO[int(os.path.basename(f).split(' ')[0])] = f
+            except ValueError as e:
+                print(e)
     print(f'{len(ID_TO_AUDIO)} songs processed.')
 
 if args.testcase:
@@ -630,6 +705,82 @@ if args.testcase:
 
     vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+") if not args.metadata else sys.stdout, metadata_only=args.metadata)
 
+    exit(0)
+elif args.convert:
+    # Create output directory.
+    if not os.path.exists('out'):
+        print(f'Creating output directory.')
+        os.mkdir('out')
+
+    # Load source directory.
+    for f in os.listdir('data/vox_01_ifs'):
+        vox_path = 'data/vox_01_ifs/' + f
+        print(vox_path + ':')
+        try:
+            vox = Vox.from_file(vox_path)
+        except (VoxNameError, MetadataFindError, AudioFileFindError) as e:
+            print(f'> Skipping file "{vox_path}": {e}')
+            continue
+
+        print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
+
+        # First try to parse the file.
+        try:
+            vox.parse()
+        except Exception as e:
+            print('> Parsing vox file failed with ' + str(e))
+            continue
+
+        game_dir = f'out/{str(vox.game_id).zfill(3)}'
+        if not os.path.isdir(game_dir):
+            print(f'> Making game directory "{game_dir}".')
+            os.mkdir(game_dir)
+        song_dir = f'{game_dir}/{vox.get_metadata("ascii")}'
+        if not os.path.isdir(song_dir):
+            print(f'> Creating song directory "{song_dir}".')
+            os.mkdir(song_dir)
+
+        target_audio_path = song_dir + '/track.mp3'
+        if not os.path.exists(target_audio_path):
+            src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
+            print(f'> Copying audio file {src_audio_path} to song directory.')
+            copyfile(src_audio_path, target_audio_path)
+        else:
+            print(f'> Audio file "{target_audio_path}" already exists.')
+
+        src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+        src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+
+        fallback_jacket_diff_idx = None
+        if os.path.exists(src_jacket_path):
+            target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+            print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+            copyfile(src_jacket_path, target_jacket_path)
+        else:
+            print(f'> Could not find jacket image file. Checking easier diffs.')
+            fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+            while True:
+                if fallback_jacket_diff_idx < 0:
+                    print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                    fallback_jacket_diff_idx = ''
+                    break
+
+                easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
+                if os.path.exists(easier_jacket_path):
+                    # We found the diff number with the jacket.
+                    print(f'> Using jacket "{easier_jacket_path}".')
+                    break
+                fallback_jacket_diff_idx -= 1
+
+        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+        print(f'> Writing KSH data to "{chart_path}".')
+        with open(chart_path, "w+", encoding='utf-8') as ksh_file:
+            try:
+                vox.as_ksh(file=ksh_file, jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None)
+            except Exception as e:
+                print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
+                continue
+            print('> Success!')
     exit(0)
 
 print('Please specify something to do.')

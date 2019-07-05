@@ -646,16 +646,16 @@ CASES = {
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
-argparser.add_argument('-m', '--metadata', action='store_true')
+argparser.add_argument('-m', '--metadata-only', action='store_true')
 argparser.add_argument('-a', '--audio-folder', default='D:\\SDVX-Extract (V0)')
 argparser.add_argument('-j', '--jacket-folder', default='D:\\SDVX-Extract (jk)')
-argparser.add_argument('-n', '--no-extra', action='store_true')
+argparser.add_argument('-n', '--no-media', action='store_true')
 argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 ID_TO_AUDIO = {}
 
-if not args.no_extra:
+if not args.no_media:
     print('Generating audio file mapping...')
     # Audio files should have a name starting with the ID followed by a space.
     for _, _, files in os.walk(args.audio_folder):
@@ -677,7 +677,7 @@ if args.testcase:
         exit(1)
     vox = Vox.from_file(CASES[args.testcase])
 
-    vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+") if not args.metadata else sys.stdout, metadata_only=args.metadata)
+    vox.as_ksh(file=open(f'{args.testcase}.ksh', "w+") if not args.metadata_only else sys.stdout, metadata_only=args.metadata_only)
 
     exit(0)
 elif args.convert:
@@ -715,7 +715,7 @@ elif args.convert:
             os.mkdir(song_dir)
 
         fallback_jacket_diff_idx = None
-        if not args.no_extra:
+        if not args.no_media:
             target_audio_path = song_dir + '/track.mp3'
             if not os.path.exists(target_audio_path):
                 src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]

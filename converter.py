@@ -61,6 +61,25 @@ class Timing:
             return self.beat - other.beat
         return self.measure - other.measure
 
+class CameraParam(Enum):
+    @classmethod
+    def from_vox_name(cls, vox_name):
+        if vox_name == 'CAM_RotX':
+            return cls.ROT_X
+        elif vox_name == 'CAM_Radi':
+            return cls.RAD_I
+        else:
+            return None
+
+    def to_ksh_name(self):
+        if self == self.ROT_X:
+            return 'zoom_top'
+        elif self == self.RAD_I:
+            return 'zoom_bottom'
+
+    ROT_X = auto()
+    RAD_I = auto()
+
 class KshootEffect(Enum):
     def to_ksh_name(self, params):
         if self == KshootEffect.RETRIGGER:
@@ -305,6 +324,8 @@ class Vox:
                 return cls.END_POSITION
             elif token == 'SOUND ID START':
                 return cls.SOUND_ID
+            elif token == 'SPCONTROLLER':
+                return cls.SPCONTROLLER
             elif token == 'TRACK AUTO TAB':
                 return None
             elif token.startswith('TRACK'):
@@ -318,6 +339,7 @@ class Vox:
         END_POSITION = auto()
         SOUND_ID = auto()
         TRACK = auto()
+        SPCONTROLLER = auto()
 
     def __init__(self):
         self.voxfile = None
@@ -327,6 +349,7 @@ class Vox:
         self.defines = {}
         self.time_sigs = {}
         self.bpms = {}
+        self.camera_changes = {}
         self.end = None
         self.events = []
 
@@ -372,6 +395,9 @@ class Vox:
             self.end = Timing.from_time_str(line)
         elif self.state == self.State.SOUND_ID:
             raise ParserError('non-define line encountered in SOUND ID', filename, line_no)
+        elif self.state == self.State.SPCONTROLLER:
+            param = CameraParam.from_vox_name(splitted[1])
+            self.camera_changes[(Timing.from_time_str(splitted[0]), param)] = float(splitted[4])
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:
                 laser_node = LaserNode.Builder()
@@ -483,6 +509,12 @@ ver=167''', file=file)
 
                     if now in self.bpms:
                         buffer += f't={str(self.bpms[now]).rstrip("0").rstrip(".")}\n'
+
+                    # Camera events.
+                    for cam_param in CameraParam:
+                        if (now, cam_param) in self.camera_changes:
+                            # TODO Tune scaling factor.
+                            buffer += f'{cam_param.to_ksh_name()}={int(self.camera_changes[(now, cam_param)] * 100)}\n'
 
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}

@@ -566,9 +566,9 @@ ver=167''', file=file)
                         if lasers_here[lsr] is not None:
                             buffer += lasers_here[lsr].position_ksh()
                         else:
-                            if lasers[lsr]:
+                            if lasers[lsr] and not laser_cancel:
                                 buffer += ':'
-                            elif not laser_cancel:
+                            else:
                                 # No laser event or ongoing laser.
                                 buffer += '-'
 

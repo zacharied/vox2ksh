@@ -77,6 +77,12 @@ class CameraParam(Enum):
         elif self == self.RAD_I:
             return 'zoom_bottom'
 
+    def scaling_factor(self):
+        if self == self.ROT_X:
+            return 150.0
+        elif self == self.RAD_I:
+            return -150.0
+
     ROT_X = auto()
     RAD_I = auto()
 
@@ -513,8 +519,8 @@ ver=167''', file=file)
                     # Camera events.
                     for cam_param in CameraParam:
                         if (now, cam_param) in self.camera_changes:
-                            # TODO Tune scaling factor.
-                            buffer += f'{cam_param.to_ksh_name()}={int(self.camera_changes[(now, cam_param)] * 100)}\n'
+                            the_change = self.camera_changes[(now, cam_param)]
+                            buffer += f'{cam_param.to_ksh_name()}={int(the_change * cam_param.scaling_factor())}'
 
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}

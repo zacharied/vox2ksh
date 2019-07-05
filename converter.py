@@ -64,39 +64,39 @@ class Timing:
 class KshootEffect(Enum):
     def to_ksh_name(self, params):
         if self == KshootEffect.RETRIGGER:
-            division = params['division'] or 8
+            division = 8 if params is None else params['division']
             return f'Retrigger;{division}'
 
         elif self == KshootEffect.GATE:
-            division = params['division'] or 8
+            division = 8 if params is None else params['division']
             return f'Gate;{division}'
 
         elif self == KshootEffect.FLANGER:
             return 'Flanger'
 
         elif self == KshootEffect.BITCRUSHER:
-            degree = params['degree'] or 10
+            degree = 10 if params is None else params['degree']
             return f'BitCrusher;{degree}'
 
         elif self == KshootEffect.PHASER:
             return 'Phaser'
 
         elif self == KshootEffect.WOBBLE:
-            division = params['division'] or 12
+            division = 12 if params is None else params['division']
             return f'Wobble;{division}'
 
         elif self == KshootEffect.PITCHSHIFT:
-            tones = params['tones'] or 12
+            tones = 12 if params is None else params['tones']
             return f'PitchShift;{tones}'
 
         elif self == KshootEffect.TAPESTOP:
-            speed = params['speed'] or 50
+            speed = 50 if params is None else params['speed']
             return f'TapeStop;{speed}'
 
         elif self == KshootEffect.ECHO:
             # TODO Figure out echo parameters.
-            x = params['x'] or 4
-            y = params['y'] or 60
+            x = 4 if params is None else params['x']
+            y = 60 if params is None else params['y']
             return f'Echo;{x};{y}'
 
         elif self == KshootEffect.SIDECHAIN:
@@ -279,30 +279,6 @@ class Difficulty(Enum):
             return 4
         else:
             return 5
-
-class KshootEffect(Enum):
-    def to_ksh_name(self):
-        # TODO Effect parameters
-        if self == KshootEffect.RETRIGGER:
-            return 'Retrigger;8'
-        elif self == KshootEffect.GATE:
-            return 'Gate;8'
-        elif self == KshootEffect.FLANGER:
-            return 'Flanger'
-        elif self == KshootEffect.BITCRUSHER:
-            return 'BitCrusher;10'
-        elif self == KshootEffect.PHASER:
-            return 'Phaser'
-        elif self == KshootEffect.WOBBLE:
-            return 'Wobble;12'
-        elif self == KshootEffect.PITCHSHIFT:
-            return 'PitchShift;12'
-        elif self == KshootEffect.TAPESTOP:
-            return 'TapeStop;50'
-        elif self == KshootEffect.ECHO:
-            return 'Echo;4;60'
-        elif self == KshootEffect.SIDECHAIN:
-            return 'SideChain'
 
 class ParserError(Exception):
     """ Exception raised when the Vox parser encounters invalid syntax. """
@@ -518,8 +494,9 @@ ver=167''', file=file)
                         if type(e) is ButtonPress and e.duration != 0:
                             if Button.is_fx(e.button):
                                 letter = 'l' if e.button == Button.FX_L else 'r'
-                                # Assign random FX to FX hold.
-                                buffer += f'fx-{letter}={e.effect[0].to_ksh_name(e.effect[1])}\n'
+                                effect_string = e.effect[0].to_ksh_name(e.effect[1]) if e.effect is not None else \
+                                    random.choice(list(KshootEffect)).to_ksh_name(None)
+                                buffer += f'fx-{letter}={effect_string}\n'
                             holds.append([e.button, e.duration])
                         elif type(e) is ButtonPress:
                             buttons_here.append(e.button)
@@ -740,37 +717,38 @@ elif args.convert:
             print(f'> Creating song directory "{song_dir}".')
             os.mkdir(song_dir)
 
-        target_audio_path = song_dir + '/track.mp3'
-        if not os.path.exists(target_audio_path):
-            src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
-            print(f'> Copying audio file {src_audio_path} to song directory.')
-            copyfile(src_audio_path, target_audio_path)
-        else:
-            print(f'> Audio file "{target_audio_path}" already exists.')
-
-        src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-        src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
-
         fallback_jacket_diff_idx = None
-        if os.path.exists(src_jacket_path):
-            target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
-            print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
-            copyfile(src_jacket_path, target_jacket_path)
-        else:
-            print(f'> Could not find jacket image file. Checking easier diffs.')
-            fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
-            while True:
-                if fallback_jacket_diff_idx < 0:
-                    print('> No jackets found for easier difficulties either. Leaving jacket blank.')
-                    fallback_jacket_diff_idx = ''
-                    break
+        if not args.no_extra:
+            target_audio_path = song_dir + '/track.mp3'
+            if not os.path.exists(target_audio_path):
+                src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
+                print(f'> Copying audio file {src_audio_path} to song directory.')
+                copyfile(src_audio_path, target_audio_path)
+            else:
+                print(f'> Audio file "{target_audio_path}" already exists.')
 
-                easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
-                if os.path.exists(easier_jacket_path):
-                    # We found the diff number with the jacket.
-                    print(f'> Using jacket "{easier_jacket_path}".')
-                    break
-                fallback_jacket_diff_idx -= 1
+            src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+            src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+
+            if os.path.exists(src_jacket_path):
+                target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+                print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+                copyfile(src_jacket_path, target_jacket_path)
+            else:
+                print(f'> Could not find jacket image file. Checking easier diffs.')
+                fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+                while True:
+                    if fallback_jacket_diff_idx < 0:
+                        print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                        fallback_jacket_diff_idx = ''
+                        break
+
+                    easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
+                    if os.path.exists(easier_jacket_path):
+                        # We found the diff number with the jacket.
+                        print(f'> Using jacket "{easier_jacket_path}".')
+                        break
+                    fallback_jacket_diff_idx -= 1
 
         chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
         print(f'> Writing KSH data to "{chart_path}".')

@@ -12,6 +12,11 @@ import argparse
 
 TICKS_PER_BEAT = 48
 
+pprint_prefix = ''
+
+def pprint(*args, **kwargs):
+    print('(' + pprint_prefix + ') '.join(map(str, args)), **kwargs)
+
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
 class VoxNameError(Exception):
@@ -56,6 +61,106 @@ class Timing:
             return self.beat - other.beat
         return self.measure - other.measure
 
+class CameraParam(Enum):
+    @classmethod
+    def from_vox_name(cls, vox_name):
+        if vox_name == 'CAM_RotX':
+            return cls.ROT_X
+        elif vox_name == 'CAM_Radi':
+            return cls.RAD_I
+        else:
+            return None
+
+    def to_ksh_name(self):
+        if self == self.ROT_X:
+            return 'zoom_top'
+        elif self == self.RAD_I:
+            return 'zoom_bottom'
+
+    def scaling_factor(self):
+        if self == self.ROT_X:
+            return 150.0
+        elif self == self.RAD_I:
+            return -150.0
+
+    ROT_X = auto()
+    RAD_I = auto()
+
+class KshootEffect(Enum):
+    def to_ksh_name(self, params):
+        if self == KshootEffect.RETRIGGER:
+            division = 8 if params is None else params['division']
+            return f'Retrigger;{division}'
+
+        elif self == KshootEffect.GATE:
+            division = 8 if params is None else params['division']
+            return f'Gate;{division}'
+
+        elif self == KshootEffect.FLANGER:
+            return 'Flanger'
+
+        elif self == KshootEffect.BITCRUSHER:
+            degree = 10 if params is None else params['degree']
+            return f'BitCrusher;{degree}'
+
+        elif self == KshootEffect.PHASER:
+            return 'Phaser'
+
+        elif self == KshootEffect.WOBBLE:
+            division = 12 if params is None else params['division']
+            return f'Wobble;{division}'
+
+        elif self == KshootEffect.PITCHSHIFT:
+            tones = 12 if params is None else params['tones']
+            return f'PitchShift;{tones}'
+
+        elif self == KshootEffect.TAPESTOP:
+            speed = 50 if params is None else params['speed']
+            return f'TapeStop;{speed}'
+
+        elif self == KshootEffect.ECHO:
+            # TODO Figure out echo parameters.
+            x = 4 if params is None else params['x']
+            y = 60 if params is None else params['y']
+            return f'Echo;{x};{y}'
+
+        elif self == KshootEffect.SIDECHAIN:
+            return 'SideChain'
+
+    @classmethod
+    def from_pre_v4_vox_sound_id(cls, sound_id):
+        if sound_id < 2:
+            if sound_id == 1:
+                print('A chart used 0bt_2mix. Please make sure the chart was "pulse_laser_higedriver_1n".')
+            return None
+        elif sound_id == 2:
+            return cls.RETRIGGER, {"division": 8}
+        elif sound_id == 3:
+            return cls.RETRIGGER, {"division": 16}
+        elif sound_id == 4:
+            return cls.GATE, {"division": 16}
+        elif sound_id == 5:
+            return cls.FLANGER
+        elif sound_id == 6:
+            return cls.RETRIGGER, {"division": 32}
+        elif sound_id == 7:
+            return cls.GATE, {"division": 8}
+        elif sound_id == 8:
+            return cls.PITCHSHIFT
+        else:
+            raise ValueError(f'Pre-v4 vox sound id {sound_id} does not exist.')
+
+    RETRIGGER = auto()
+    GATE = auto()
+    FLANGER = auto()
+    BITCRUSHER = auto()
+    PHASER = auto()
+    WOBBLE = auto()
+    PITCHSHIFT = auto()
+    TAPESTOP = auto()
+    ECHO = auto()
+    SIDECHAIN = auto()
+
 class Button(Enum):
     BT_A = auto()
     BT_B = auto()
@@ -85,10 +190,11 @@ class Button(Enum):
             raise ValueError('invalid track number for button: {}'.format(num))
 
 class ButtonPress:
-    def __init__(self, time: Timing, button: Button, duration: int):
+    def __init__(self, time: Timing, button: Button, duration: int, effect: (KshootEffect, dict)):
         self.time = time
         self.button = button
         self.duration = duration
+        self.effect = effect
 
 LaserRangeChange = namedtuple('LaserRangeChange', 'time side range')
 
@@ -199,40 +305,10 @@ class Difficulty(Enum):
         else:
             return 5
 
-class KshootEffect(Enum):
-    def to_ksh_name(self):
-        # TODO Effect parameters
-        if self == KshootEffect.RETRIGGER:
-            return 'Retrigger;8'
-        elif self == KshootEffect.GATE:
-            return 'Gate;8'
-        elif self == KshootEffect.FLANGER:
-            return 'Flanger'
-        elif self == KshootEffect.BITCRUSHER:
-            return 'BitCrusher;10'
-        elif self == KshootEffect.PHASER:
-            return 'Phaser'
-        elif self == KshootEffect.WOBBLE:
-            return 'Wobble;12'
-        elif self == KshootEffect.PITCHSHIFT:
-            return 'PitchShift;12'
-        elif self == KshootEffect.TAPESTOP:
-            return 'TapeStop;50'
-        elif self == KshootEffect.ECHO:
-            return 'Echo;4;60'
-        elif self == KshootEffect.SIDECHAIN:
-            return 'SideChain'
-
-    RETRIGGER = auto()
-    GATE = auto()
-    FLANGER = auto()
-    BITCRUSHER = auto()
-    PHASER = auto()
-    WOBBLE = auto()
-    PITCHSHIFT = auto()
-    TAPESTOP = auto()
-    ECHO = auto()
-    SIDECHAIN = auto()
+class ParserError(Exception):
+    """ Exception raised when the Vox parser encounters invalid syntax. """
+    def __init__(self, message, filename, line):
+        super().__init__(f'({filename}:{str(line)} {message}')
 
 class Vox:
     class State(Enum):
@@ -254,6 +330,8 @@ class Vox:
                 return cls.END_POSITION
             elif token == 'SOUND ID START':
                 return cls.SOUND_ID
+            elif token == 'SPCONTROLLER':
+                return cls.SPCONTROLLER
             elif token == 'TRACK AUTO TAB':
                 return None
             elif token.startswith('TRACK'):
@@ -267,14 +345,17 @@ class Vox:
         END_POSITION = auto()
         SOUND_ID = auto()
         TRACK = auto()
+        SPCONTROLLER = auto()
 
     def __init__(self):
         self.voxfile = None
         self.game_id = 0
         self.song_id = 0
         self.vox_version = 0
+        self.defines = {}
         self.time_sigs = {}
         self.bpms = {}
+        self.camera_changes = {}
         self.end = None
         self.events = []
 
@@ -297,12 +378,13 @@ class Vox:
         return self.metadata.find('info').find(tag).text
 
     def bpm_string(self):
+        # TODO Make sure decimal BPM's are okay.
         if self.get_metadata('bpm_min') == self.get_metadata('bpm_max'):
             return int(int(self.get_metadata('bpm_min')) / 100)
         else:
             return f"{int(int(self.get_metadata('bpm_min')) / 100)}-{int(int(self.get_metadata('bpm_max')) / 100)}"
 
-    def process_state(self, line):
+    def process_state(self, line, filename=None, line_no=None):
         splitted = line.split('\t')
 
         if self.state == self.State.FORMAT_VERSION:
@@ -318,8 +400,10 @@ class Vox:
         elif self.state == self.State.END_POSITION:
             self.end = Timing.from_time_str(line)
         elif self.state == self.State.SOUND_ID:
-            # TODO Figure this out.
-            pass
+            raise ParserError('non-define line encountered in SOUND ID', filename, line_no)
+        elif self.state == self.State.SPCONTROLLER:
+            param = CameraParam.from_vox_name(splitted[1])
+            self.camera_changes[(Timing.from_time_str(splitted[0]), param)] = float(splitted[4])
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:
                 laser_node = LaserNode.Builder()
@@ -350,7 +434,18 @@ class Vox:
             else:
                 try:
                     button = Button.from_track_num(self.state_track)
-                    self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1])))
+                    fx_data = None
+                    if button.is_fx():
+                        # Process effect assignment.
+                        if self.vox_version < 4:
+                            sound_id = int(splitted[3]) if splitted[3].isdigit() else int(self.defines[splitted[3]])
+                            fx_res = KshootEffect.from_pre_v4_vox_sound_id(sound_id)
+                            if type(fx_res) is tuple:
+                                fx_data = (fx_res[0], fx_res[1])
+                            else:
+                                fx_data = (fx_res, None)
+
+                    self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1]), fx_data))
                 except ValueError:
                     raise ButtonEventError(f'{self.state_track} is an invalid button track')
 
@@ -368,7 +463,7 @@ illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
-m=track.mp3
+m={self.song_id}.mp3
 mvol={self.get_metadata('volume')}
 o=0
 bg=desert
@@ -400,12 +495,18 @@ ver=167''', file=file)
         for m in measure_iter:
             measure = m + 1
 
-            # Laser range resets every measure with KSH
+            # Laser range resets every measure in ksh.
             laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
+
             for b in range(current_timesig.top):
+                # Vox beats are also 1-indexed.
                 beat = b + 1
+
                 for o in range(TICKS_PER_BEAT):
+                    # However, vox offsets are 0-indexed.
+
                     now = Timing(measure, beat, o)
+
                     buffer = ''
 
                     if now in self.time_sigs:
@@ -415,14 +516,22 @@ ver=167''', file=file)
                     if now in self.bpms:
                         buffer += f't={str(self.bpms[now]).rstrip("0").rstrip(".")}\n'
 
+                    # Camera events.
+                    for cam_param in CameraParam:
+                        if (now, cam_param) in self.camera_changes:
+                            the_change = self.camera_changes[(now, cam_param)]
+                            buffer += f'{cam_param.to_ksh_name()}={int(the_change * cam_param.scaling_factor())}'
+
                     buttons_here = []
                     lasers_here = {LaserSide.LEFT: None, LaserSide.RIGHT: None}
-                    for e in filter(lambda e: e.time == Timing(measure, beat, o), self.events):
+                    for e in filter(lambda x: x.time == Timing(measure, beat, o), self.events):
                         # Check if it's a hold first.
                         if type(e) is ButtonPress and e.duration != 0:
                             if Button.is_fx(e.button):
-                                # Assign random FX to FX hold.
-                                buffer += 'fx-{}={}\n'.format('l' if e.button == Button.FX_L else 'r', random.choice(list(KshootEffect)).to_ksh_name())
+                                letter = 'l' if e.button == Button.FX_L else 'r'
+                                effect_string = e.effect[0].to_ksh_name(e.effect[1]) if e.effect is not None else \
+                                    random.choice(list(KshootEffect)).to_ksh_name(None)
+                                buffer += f'fx-{letter}={effect_string}\n'
                             holds.append([e.button, e.duration])
                         elif type(e) is ButtonPress:
                             buttons_here.append(e.button)
@@ -450,14 +559,11 @@ ver=167''', file=file)
                         Button.FX_L,
                         Button.FX_R
                     ]:
-                        yes = '1'
+                        yes = '2' if btn.is_fx() else '1'
                         no = '0'
-                        hold = '2'
+                        hold = '1' if btn.is_fx() else '2'
 
-                        if btn == Button.FX_L or btn == Button.FX_R:
-                            yes = '2'
-                            hold = '1'
-
+                        # A bar separates BT from FX.
                         if btn == Button.FX_L:
                             buffer += '|'
 
@@ -495,9 +601,9 @@ ver=167''', file=file)
                         if lasers_here[lsr] is not None:
                             buffer += lasers_here[lsr].position_ksh()
                         else:
-                            if lasers[lsr]:
+                            if lasers[lsr] and not laser_cancel:
                                 buffer += ':'
-                            elif not laser_cancel:
+                            else:
                                 # No laser event or ongoing laser.
                                 buffer += '-'
 
@@ -555,6 +661,16 @@ ver=167''', file=file)
                     self.state_track = int(token_state[1])
                 else:
                     self.state = token_state
+            elif line.startswith('define'):
+                splitted = line.split('\t')
+
+                # Sanity check.
+                if splitted[0] != 'define':
+                    raise ParserError('illegal define line in SOUND ID', self.voxfile, line_no)
+                if len(splitted) != 3:
+                    raise ParserError('illegal number of operands in define statement', self.voxfile, line_no)
+
+                self.defines[splitted[1]] = splitted[2]
             elif self.state is not None:
                 self.process_state(line)
             line_no += 1
@@ -562,30 +678,22 @@ ver=167''', file=file)
 CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
     'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox',
-    'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox'
+    'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox',
+    'early-version': 'data/vox_01_ifs/001_0001_albida_muryoku_1n.vox'
 }
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
-argparser.add_argument('-m', '--metadata', action='store_true')
+argparser.add_argument('-m', '--metadata-only', action='store_true')
 argparser.add_argument('-a', '--audio-folder', default='D:\\SDVX-Extract (V0)')
 argparser.add_argument('-j', '--jacket-folder', default='D:\\SDVX-Extract (jk)')
-argparser.add_argument('-n', '--no-extra', action='store_true')
+argparser.add_argument('-n', '--no-media', action='store_true')
 argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 ID_TO_AUDIO = {}
 
-class Failures(dataobject):
-    filename_parse_error = []
-    vox_parse_error = []
-    ksh_output_error = []
-    no_metadata = []
-    no_audio = []
-
-failures = Failures()
-
-if not args.no_extra:
+if not args.no_media:
     print('Generating audio file mapping...')
     # Audio files should have a name starting with the ID followed by a space.
     for _, _, files in os.walk(args.audio_folder):
@@ -607,7 +715,7 @@ if args.testcase:
         exit(1)
     vox = Vox.from_file(CASES[args.testcase])
 
-    vox.as_ksh(file=open('{}.ksh'.format(args.testcase), "w+") if not args.metadata else sys.stdout, metadata_only=args.metadata)
+    vox.as_ksh(file=open(f'{args.testcase}.ksh', "w+") if not args.metadata_only else sys.stdout, metadata_only=args.metadata_only)
 
     exit(0)
 elif args.convert:
@@ -624,12 +732,6 @@ elif args.convert:
             vox = Vox.from_file(vox_path)
         except (VoxNameError, MetadataFindError, AudioFileFindError) as e:
             print(f'> Skipping file "{vox_path}": {e}')
-            if type(e) is VoxNameError:
-                failures.filename_parse_error.append((vox_path, e))
-            elif type(e) is MetadataFindError:
-                failures.no_metadata.append((vox_path, e))
-            elif type(e) is AudioFileFindError:
-                failures.no_audio.append((vox_path, e))
             continue
 
         print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
@@ -639,7 +741,6 @@ elif args.convert:
             vox.parse()
         except Exception as e:
             print('> Parsing vox file failed with ' + str(e))
-            failures.vox_parse_error.append((vox.song_id, e))
             continue
 
         game_dir = f'out/{str(vox.game_id).zfill(3)}'
@@ -651,37 +752,38 @@ elif args.convert:
             print(f'> Creating song directory "{song_dir}".')
             os.mkdir(song_dir)
 
-        target_audio_path = song_dir + '/track.mp3'
-        if not os.path.exists(target_audio_path):
-            src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
-            print(f'> Copying audio file {src_audio_path} to song directory.')
-            copyfile(src_audio_path, target_audio_path)
-        else:
-            print(f'> Audio file "{target_audio_path}" already exists.')
-
-        src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-        src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
-
         fallback_jacket_diff_idx = None
-        if os.path.exists(src_jacket_path):
-            target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
-            print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
-            copyfile(src_jacket_path, target_jacket_path)
-        else:
-            print(f'> Could not find jacket image file. Checking easier diffs.')
-            fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
-            while True:
-                if fallback_jacket_diff_idx < 0:
-                    print('> No jackets found for easier difficulties either. Leaving jacket blank.')
-                    fallback_jacket_diff_idx = ''
-                    break
+        if not args.no_media:
+            target_audio_path = song_dir + '/track.mp3'
+            if not os.path.exists(target_audio_path):
+                src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
+                print(f'> Copying audio file {src_audio_path} to song directory.')
+                copyfile(src_audio_path, target_audio_path)
+            else:
+                print(f'> Audio file "{target_audio_path}" already exists.')
 
-                easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
-                if os.path.exists(easier_jacket_path):
-                    # We found the diff number with the jacket.
-                    print(f'> Using jacket "{easier_jacket_path}".')
-                    break
-                fallback_jacket_diff_idx -= 1
+            src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+            src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+
+            if os.path.exists(src_jacket_path):
+                target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+                print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+                copyfile(src_jacket_path, target_jacket_path)
+            else:
+                print(f'> Could not find jacket image file. Checking easier diffs.')
+                fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+                while True:
+                    if fallback_jacket_diff_idx < 0:
+                        print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                        fallback_jacket_diff_idx = ''
+                        break
+
+                    easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
+                    if os.path.exists(easier_jacket_path):
+                        # We found the diff number with the jacket.
+                        print(f'> Using jacket "{easier_jacket_path}".')
+                        break
+                    fallback_jacket_diff_idx -= 1
 
         chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
         print(f'> Writing KSH data to "{chart_path}".')
@@ -690,7 +792,6 @@ elif args.convert:
                 vox.as_ksh(file=ksh_file, jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None)
             except Exception as e:
                 print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
-                failures.ksh_output_error.append((vox.song_id, e))
                 continue
             print('> Success!')
     exit(0)

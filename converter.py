@@ -412,9 +412,6 @@ class Vox:
                                 fx_data = (fx_res[0], fx_res[1])
                             else:
                                 fx_data = (fx_res, None)
-                        else:
-                            print('FX parsing for vox version > 3 not implemented')
-                            pass
 
                     self.events.append(ButtonPress(Timing.from_time_str(splitted[0]), button, int(splitted[1]), fx_data))
                 except ValueError:

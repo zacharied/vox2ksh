@@ -29,6 +29,8 @@ class LaserNodeFormatError(Exception):
     pass
 class ButtonEventError(Exception):
     pass
+class KshConversionError(Exception):
+    pass
 
 class Timing:
     def __init__(self, measure, beat, offset):
@@ -463,7 +465,7 @@ illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
-m={self.song_id}.mp3
+m=track.mp3
 mvol={self.get_metadata('volume')}
 o=0
 bg=desert
@@ -498,6 +500,12 @@ ver=167''', file=file)
             # Laser range resets every measure in ksh.
             laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
 
+            now = Timing(measure, 1, 0)
+
+            if now in self.time_sigs:
+                current_timesig = self.time_sigs[now]
+                print(f'beat={current_timesig.top}/{current_timesig.bottom}', file=file)
+
             for b in range(current_timesig.top):
                 # Vox beats are also 1-indexed.
                 beat = b + 1
@@ -509,12 +517,11 @@ ver=167''', file=file)
 
                     buffer = ''
 
-                    if now in self.time_sigs:
-                        current_timesig = self.time_sigs[now]
-                        buffer += f'time={current_timesig.top}/{current_timesig.bottom}\n'
+                    if now.beat > 1 and now.offset > 0 and now in self.time_sigs:
+                        raise KshConversionError('time signature change in the middle of a measure')
 
                     if now in self.bpms:
-                        buffer += f't={str(self.bpms[now]).rstrip("0").rstrip(".")}\n'
+                        buffer += f't={str(self.bpms[now]).rstrip("0").rstrip(".").strip()}\n'
 
                     # Camera events.
                     for cam_param in CameraParam:
@@ -679,7 +686,8 @@ CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
     'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox',
     'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox',
-    'early-version': 'data/vox_01_ifs/001_0001_albida_muryoku_1n.vox'
+    'early-version': 'data/vox_01_ifs/001_0001_albida_muryoku_1n.vox',
+    'bpm': 'data/vox_03_ifs/002_0262_hanakagerou_minamotoya_1n.vox'
 }
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
@@ -714,8 +722,9 @@ if args.testcase:
             print('\t' + c, file=sys.stderr)
         exit(1)
     vox = Vox.from_file(CASES[args.testcase])
+    vox.parse()
 
-    vox.as_ksh(file=open(f'{args.testcase}.ksh', "w+") if not args.metadata_only else sys.stdout, metadata_only=args.metadata_only)
+    vox.as_ksh(file=open(f'{args.testcase}.ksh', "w+", encoding='utf-8') if not args.metadata_only else sys.stdout, metadata_only=args.metadata_only)
 
     exit(0)
 elif args.convert:
@@ -724,76 +733,80 @@ elif args.convert:
         print(f'Creating output directory.')
         os.mkdir('out')
 
+    VOX_ROOT = 'data'
+
     # Load source directory.
-    for f in os.listdir('data/vox_01_ifs'):
-        vox_path = 'data/vox_01_ifs/' + f
-        print(vox_path + ':')
-        try:
-            vox = Vox.from_file(vox_path)
-        except (VoxNameError, MetadataFindError, AudioFileFindError) as e:
-            print(f'> Skipping file "{vox_path}": {e}')
-            continue
-
-        print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
-
-        # First try to parse the file.
-        try:
-            vox.parse()
-        except Exception as e:
-            print('> Parsing vox file failed with ' + str(e))
-            continue
-
-        game_dir = f'out/{str(vox.game_id).zfill(3)}'
-        if not os.path.isdir(game_dir):
-            print(f'> Making game directory "{game_dir}".')
-            os.mkdir(game_dir)
-        song_dir = f'{game_dir}/{vox.get_metadata("ascii")}'
-        if not os.path.isdir(song_dir):
-            print(f'> Creating song directory "{song_dir}".')
-            os.mkdir(song_dir)
-
-        fallback_jacket_diff_idx = None
-        if not args.no_media:
-            target_audio_path = song_dir + '/track.mp3'
-            if not os.path.exists(target_audio_path):
-                src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
-                print(f'> Copying audio file {src_audio_path} to song directory.')
-                copyfile(src_audio_path, target_audio_path)
-            else:
-                print(f'> Audio file "{target_audio_path}" already exists.')
-
-            src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-            src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
-
-            if os.path.exists(src_jacket_path):
-                target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
-                print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
-                copyfile(src_jacket_path, target_jacket_path)
-            else:
-                print(f'> Could not find jacket image file. Checking easier diffs.')
-                fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
-                while True:
-                    if fallback_jacket_diff_idx < 0:
-                        print('> No jackets found for easier difficulties either. Leaving jacket blank.')
-                        fallback_jacket_diff_idx = ''
-                        break
-
-                    easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
-                    if os.path.exists(easier_jacket_path):
-                        # We found the diff number with the jacket.
-                        print(f'> Using jacket "{easier_jacket_path}".')
-                        break
-                    fallback_jacket_diff_idx -= 1
-
-        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
-        print(f'> Writing KSH data to "{chart_path}".')
-        with open(chart_path, "w+", encoding='utf-8') as ksh_file:
+    for d in filter(lambda x: os.path.isdir(VOX_ROOT + '/' + x), os.listdir(VOX_ROOT)):
+        vox_dir = VOX_ROOT + '/' + d
+        for f in os.listdir(vox_dir):
+            vox_path = f'{vox_dir}/{f}'
+            print(vox_path + ':')
             try:
-                vox.as_ksh(file=ksh_file, jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None)
-            except Exception as e:
-                print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
+                vox = Vox.from_file(vox_path)
+            except (VoxNameError, MetadataFindError, AudioFileFindError) as e:
+                print(f'> Skipping file "{vox_path}": {e}')
                 continue
-            print('> Success!')
+
+            print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
+
+            # First try to parse the file.
+            try:
+                vox.parse()
+            except Exception as e:
+                print('> Parsing vox file failed with ' + str(e))
+                continue
+
+            game_dir = f'out/{str(vox.game_id).zfill(3)}'
+            if not os.path.isdir(game_dir):
+                print(f'> Making game directory "{game_dir}".')
+                os.mkdir(game_dir)
+            song_dir = f'{game_dir}/{vox.get_metadata("ascii")}'
+            if not os.path.isdir(song_dir):
+                print(f'> Creating song directory "{song_dir}".')
+                os.mkdir(song_dir)
+
+            fallback_jacket_diff_idx = None
+            if not args.no_media:
+                target_audio_path = song_dir + '/track.mp3'
+                if not os.path.exists(target_audio_path):
+                    src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
+                    print(f'> Copying audio file {src_audio_path} to song directory.')
+                    copyfile(src_audio_path, target_audio_path)
+                else:
+                    print(f'> Audio file "{target_audio_path}" already exists.')
+
+                src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+                src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+
+                if os.path.exists(src_jacket_path):
+                    target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+                    print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+                    copyfile(src_jacket_path, target_jacket_path)
+                else:
+                    print(f'> Could not find jacket image file. Checking easier diffs.')
+                    fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+                    while True:
+                        if fallback_jacket_diff_idx < 0:
+                            print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                            fallback_jacket_diff_idx = ''
+                            break
+
+                        easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
+                        if os.path.exists(easier_jacket_path):
+                            # We found the diff number with the jacket.
+                            print(f'> Using jacket "{easier_jacket_path}".')
+                            break
+                        fallback_jacket_diff_idx -= 1
+
+            chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+            print(f'> Writing KSH data to "{chart_path}".')
+            with open(chart_path, "w+", encoding='utf-8') as ksh_file:
+                try:
+                    vox.as_ksh(file=ksh_file, jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None)
+                except Exception as e:
+                    print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
+                    continue
+                print('> Success!')
     exit(0)
 
 print('Please specify something to do.')

@@ -152,6 +152,13 @@ class KshootEffect(Enum):
         else:
             raise ValueError(f'Pre-v4 vox sound id {sound_id} does not exist.')
 
+    @classmethod
+    def choose_random(cls):
+        choice = random.choice(list(cls))
+        if choice == cls.TAPESTOP or choice == cls.PITCHSHIFT:
+            return cls.choose_random()
+        return choice
+
     RETRIGGER = auto()
     GATE = auto()
     FLANGER = auto()
@@ -537,7 +544,7 @@ ver=167''', file=file)
                             if Button.is_fx(e.button):
                                 letter = 'l' if e.button == Button.FX_L else 'r'
                                 effect_string = e.effect[0].to_ksh_name(e.effect[1]) if e.effect is not None else \
-                                    random.choice(list(KshootEffect)).to_ksh_name(None)
+                                    KshootEffect.choose_random().to_ksh_name(None)
                                 buffer += f'fx-{letter}={effect_string}\n'
                             holds.append([e.button, e.duration])
                         elif type(e) is ButtonPress:

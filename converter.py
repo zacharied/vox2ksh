@@ -454,6 +454,9 @@ class Vox:
         self.end = None
         self.events = {}
 
+        self.last_time = Timing(1, 1, 0)
+        self.new_laser = False
+
         self.state = None
         self.state_track = 0
 
@@ -571,13 +574,21 @@ class Vox:
 
                 # Check if it's a slam.
                 slam_start = self.events_track(self.state_track).get(Timing.from_time_str(splitted[0]))
+                if Timing.from_time_str(splitted[0]) == self.last_time:
+                    self.new_laser = False
+                else:
+                    self.new_laser = True
 
                 events_key = ((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))
-                if slam_start is None:
+                if self.new_laser:
                     self.events[events_key] = laser_node
                 else:
+                    if type(slam_start) is LaserSlam:
+                        slam_start = slam_start.end
                     slam = LaserSlam(slam_start, laser_node)
                     self.events[events_key] = slam
+
+                self.last_time = Timing.from_time_str(splitted[0])
 
             else:
                 try:
@@ -809,7 +820,8 @@ CASES = {
     'bpm': 'data/vox_03_ifs/002_0262_hanakagerou_minamotoya_1n.vox',
     'encoding': 'data/vox_02_ifs/001_0121_eclair_au_chocolat_kamome_1n.vox',
     'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox',
-    'diff-preview': 'data/vox_01_ifs/001_0026_gorilla_pinocchio_4i.vox'
+    'diff-preview': 'data/vox_01_ifs/001_0026_gorilla_pinocchio_4i.vox',
+    'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox'
 }
 
 def copy_preview(vox, song_dir):

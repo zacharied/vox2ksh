@@ -1,10 +1,10 @@
 from enum import Enum, auto
 from collections import namedtuple
-from collections.abc import Mapping
 from recordclass import dataobject
 from xml.etree import ElementTree
 from shutil import copyfile
 from functools import lru_cache as cache
+from os.path import splitext as splitx
 import traceback
 import random
 import math
@@ -599,11 +599,15 @@ class Vox:
                     print(f'> > Warning: ignoring invalid button track {self.state_track}')
 
 
-    def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True):
+    def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None):
         # First print metadata.
-        # TODO song file, preview, chokkaku, yomigana titles(?), background
+        # TODO chokkaku, yomigana titles(?), background
         if jacket_idx is None:
             jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
+
+        if track_basename is None:
+            track_basename = 'track.mp3'
+
         print(f'''title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
@@ -612,7 +616,7 @@ illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
-m=track.mp3
+m={track_basename}
 mvol={self.get_metadata('volume')}
 o=0
 bg=desert
@@ -909,10 +913,25 @@ if args.convert:
                 continue
 
             fallback_jacket_diff_idx = None
+
+            using_difficulty_audio = False
+
             if not args.no_media:
+
                 target_audio_path = song_dir + '/track.mp3'
+
+                src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
+
+                if vox.difficulty == Difficulty.INFINITE:
+                    src_audio_path_diff = f'{splitx(src_audio_path)[0]} [INF]{splitx(src_audio_path)[1]}'
+                    print(src_audio_path_diff)
+                    if os.path.exists(src_audio_path_diff):
+                        print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
+                        src_audio_path = src_audio_path_diff
+                        target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
+                        using_difficulty_audio = True
+
                 if not os.path.exists(target_audio_path):
-                    src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
                     print(f'> Copying audio file {src_audio_path} to song directory.')
                     copyfile(src_audio_path, target_audio_path)
                 else:
@@ -945,7 +964,9 @@ if args.convert:
             print(f'> Writing KSH data to "{chart_path}".')
             with open(chart_path, "w+", encoding='utf-8') as ksh_file:
                 try:
-                    vox.as_ksh(file=ksh_file, jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None)
+                    vox.as_ksh(file=ksh_file,
+                               jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
+                               track_basename='track_inf.mp3' if using_difficulty_audio else None)
                 except Exception as e:
                     print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
                     continue

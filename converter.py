@@ -609,7 +609,7 @@ class Vox:
                     print(f'> > Warning: ignoring invalid button track {self.state_track}')
 
 
-    def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None):
+    def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
         # First print metadata.
         # TODO chokkaku, yomigana titles(?), background
         if jacket_idx is None:
@@ -617,6 +617,9 @@ class Vox:
 
         if track_basename is None:
             track_basename = 'track.mp3'
+
+        if preview_basename is None:
+            preview_basename = 'preview.mp3'
 
         print(f'''title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
@@ -628,6 +631,7 @@ level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
 m={track_basename}
 mvol={self.get_metadata('volume')}
+previewfile={preview_basename}
 o=0
 bg=desert
 layer=arrow
@@ -845,6 +849,8 @@ def copy_preview(vox, song_dir):
     else:
         print('> No preview file found.')
 
+    return os.path.basename(output_path)
+
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-m', '--metadata-only', action='store_true')
@@ -919,7 +925,7 @@ if args.convert:
                 print(f'> Creating song directory "{song_dir}".')
                 os.mkdir(song_dir)
 
-            copy_preview(vox, song_dir)
+            preview_basename = copy_preview(vox, song_dir)
             if args.preview_only:
                 continue
 
@@ -977,7 +983,8 @@ if args.convert:
                 try:
                     vox.as_ksh(file=ksh_file,
                                jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
-                               track_basename='track_inf.mp3' if using_difficulty_audio else None)
+                               track_basename='track_inf.mp3' if using_difficulty_audio else None,
+                               preview_basename=preview_basename)
                 except Exception as e:
                     print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
                     continue

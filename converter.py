@@ -475,6 +475,7 @@ class Vox:
         return str(self.difficulty_idx) + self.difficulty.to_letter()
 
     def get_metadata(self, tag, from_diff=False):
+        res = ''
         if from_diff:
             the_diff = None
             for diff in self.metadata.find('difficulty').iter():
@@ -483,8 +484,12 @@ class Vox:
                     break
             if the_diff is None:
                 raise LookupError('difficulty {} not found in the `music` element'.format(self.difficulty.to_xml_name()))
-            return the_diff.find(tag).text
-        return self.metadata.find('info').find(tag).text
+            res = the_diff.find(tag).text.translate(METADATA_FIX)
+        else:
+            res = self.metadata.find('info').find(tag).text.translate(METADATA_FIX)
+        for p in METADATA_FIX:
+            res = res.replace(p[0], p[1])
+        return res
 
     def bpm_string(self):
         # TODO Make sure decimal BPM's are okay.
@@ -815,6 +820,31 @@ ver=167''', file=file)
                 self.process_state(line)
             line_no += 1
         self.finalized = True
+
+METADATA_FIX = [
+    ['\u203E', '~'],
+    ['\u301C', '～'],
+    ['\u49FA', 'ê'],
+    ['\u5F5C', 'ū'],
+    ['\u66E6', 'à'],
+    ['\u66E9', 'è'],
+    ['\u8E94', '🐾'],
+    ['\u9A2B', 'á'],
+    ['\u9A69', 'Ø'],
+    ['\u9A6B', 'ā'],
+    ['\u9A6A', 'ō'],
+    ['\u9AAD', 'ü'],
+    ['\u9B2F', 'ī'],
+    ['\u9EF7', 'ē'],
+    ['\u9F63', 'Ú'],
+    ['\u9F67', 'Ä'],
+    ['\u973B', '♠'],
+    ['\u9F6A', '♣'],
+    ['\u9448', '♦'],
+    ['\u9F72', '♥'],
+    ['\u9F76', '♡'],
+    ['\u9F77', 'é'],
+]
 
 CASES = {
     'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',

@@ -1016,7 +1016,7 @@ if args.convert:
                                track_basename='track_inf.mp3' if using_difficulty_audio else None,
                                preview_basename=preview_basename)
                 except Exception as e:
-                    print(f'Outputting to KSH failed with {e}. Traceback:\n{traceback.format_exc()}')
+                    print(f'Outputting to KSH failed with traceback:\n{traceback.format_exc()}')
                     continue
                 print('> Success!')
     exit(0)

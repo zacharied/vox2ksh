@@ -1,8 +1,10 @@
 from enum import Enum, auto
 from collections import namedtuple
+from collections.abc import Mapping
 from recordclass import dataobject
 from xml.etree import ElementTree
 from shutil import copyfile
+from functools import lru_cache as cache
 import traceback
 import random
 import math
@@ -266,6 +268,17 @@ class LaserSlam:
         self.start = start
         self.end = end
 
+class RevMap:
+    def __init__(self, mapping):
+        self.mapping = mapping
+        self._rev = {v: k for k, v in mapping.items()}
+
+    def get(self, k):
+        return self.mapping.get(k)
+
+    def rev(self, k):
+        return self._rev.get(k)
+
 class Difficulty(Enum):
     NOVICE = 0
     ADVANCED = 1
@@ -275,20 +288,22 @@ class Difficulty(Enum):
     # TODO GRV and HVN?
 
     @classmethod
-    def from_letter(cls, letter):
-        """ Derive value from the last letter of the vox filename. """
-        if letter == 'n':
-            return cls.NOVICE
-        elif letter == 'a':
-            return cls.ADVANCED
-        elif letter == 'e':
-            return cls.EXHAUST
-        elif letter == 'm':
-            return cls.MAXIMUM
-        elif letter == 'i':
-            return cls.INFINITE
-        else:
-            raise ValueError('invalid letter for difficulty: {}'.format(letter))
+    @cache(maxsize=None)
+    def _letter(cls):
+        return RevMap({
+            cls.NOVICE: 'n',
+            cls.ADVANCED: 'a',
+            cls.EXHAUST: 'e',
+            cls.MAXIMUM: 'm',
+            cls.INFINITE: 'i'
+        })
+
+    @classmethod
+    def from_letter(cls, k):
+        return cls._letter().rev(k)
+
+    def to_letter(self):
+        return self._letter().get(self)
 
     def to_ksh_name(self):
         """ Convert to a name recognized by KSM. """
@@ -445,6 +460,7 @@ class Vox:
 
         self.metadata: ElementTree = None
         self.difficulty = None
+        self.difficulty_idx = 0
 
         self.finalized = False
         self._events_track = {}
@@ -452,6 +468,9 @@ class Vox:
         self._events_timesig = []
         self._events_tiltmode = []
         self._events_spcontroller = {}
+
+    def diff_token(self):
+        return str(self.difficulty_idx) + self.difficulty.to_letter()
 
     def get_metadata(self, tag, from_diff=False):
         if from_diff:
@@ -731,6 +750,7 @@ ver=167''', file=file)
                 parser.game_id = int(filename_array[0])
                 parser.song_id = int(filename_array[1])
                 parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+                parser.difficulty_idx = os.path.splitext(path)[0][-2]
             except ValueError:
                 raise VoxNameError(f'unable to parse file name "{path}"')
 
@@ -785,14 +805,38 @@ CASES = {
     'early-version': 'data/vox_01_ifs/001_0001_albida_muryoku_1n.vox',
     'bpm': 'data/vox_03_ifs/002_0262_hanakagerou_minamotoya_1n.vox',
     'encoding': 'data/vox_02_ifs/001_0121_eclair_au_chocolat_kamome_1n.vox',
-    'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox'
+    'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox',
+    'diff-preview': 'data/vox_01_ifs/001_0026_gorilla_pinocchio_4i.vox'
 }
+
+def copy_preview(vox, song_dir):
+    split = os.path.splitext
+
+    output_path = f'{song_dir}/preview.mp3'
+    preview_path = f'{args.preview_dir}/{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_pre.mp3'
+    diff_preview_path = f'{split(preview_path)[0]}_{vox.diff_token()}{split(preview_path)[1]}'
+
+    if os.path.exists(diff_preview_path):
+        preview_path = diff_preview_path
+        output_path = f'{split(output_path)[0]}_{vox.diff_token()}{split(output_path)[1]}'
+
+    if os.path.exists(output_path):
+        print(f'> Preview file "{output_path}" already exists.')
+        return
+
+    if os.path.exists(preview_path):
+        print(f'> Copying preview to "{output_path}".')
+        copyfile(preview_path, output_path)
+    else:
+        print('> No preview file found.')
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-m', '--metadata-only', action='store_true')
-argparser.add_argument('-a', '--audio-folder', default='D:\\SDVX-Extract (V0)')
-argparser.add_argument('-j', '--jacket-folder', default='D:\\SDVX-Extract (jk)')
+argparser.add_argument('-p', '--preview-only', action='store_true')
+argparser.add_argument('-A', '--audio-dir', default='D:\\SDVX-Extract (V0)')
+argparser.add_argument('-J', '--jacket-dir', default='D:\\SDVX-Extract (jk)')
+argparser.add_argument('-P', '--preview-dir', default='D:\\SDVX-Extract (preview)')
 argparser.add_argument('-n', '--no-media', action='store_true')
 argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
@@ -802,7 +846,7 @@ ID_TO_AUDIO = {}
 if not args.no_media:
     print('Generating audio file mapping...')
     # Audio files should have a name starting with the ID followed by a space.
-    for _, _, files in os.walk(args.audio_folder):
+    for _, _, files in os.walk(args.audio_dir):
         for f in files:
             if os.path.basename(f) == 'jk':
                 continue
@@ -819,13 +863,8 @@ if args.testcase:
         for c in CASES.keys():
             print('\t' + c, file=sys.stderr)
         exit(1)
-    vox = Vox.from_file(CASES[args.testcase])
-    vox.parse()
 
-    vox.as_ksh(file=open(f'{args.testcase}.ksh', "w+", encoding='utf-8') if not args.metadata_only else sys.stdout, metadata_only=args.metadata_only)
-
-    exit(0)
-elif args.convert:
+if args.convert:
     # Create output directory.
     if not os.path.exists('out'):
         print(f'Creating output directory.')
@@ -838,6 +877,8 @@ elif args.convert:
         vox_dir = VOX_ROOT + '/' + d
         for f in os.listdir(vox_dir):
             vox_path = f'{vox_dir}/{f}'
+            if args.testcase and vox_path != CASES[args.testcase]:
+                continue
             print(vox_path + ':')
             try:
                 vox = Vox.from_file(vox_path)
@@ -863,18 +904,22 @@ elif args.convert:
                 print(f'> Creating song directory "{song_dir}".')
                 os.mkdir(song_dir)
 
+            copy_preview(vox, song_dir)
+            if args.preview_only:
+                continue
+
             fallback_jacket_diff_idx = None
             if not args.no_media:
                 target_audio_path = song_dir + '/track.mp3'
                 if not os.path.exists(target_audio_path):
-                    src_audio_path = args.audio_folder + '/' + ID_TO_AUDIO[vox.song_id]
+                    src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
                     print(f'> Copying audio file {src_audio_path} to song directory.')
                     copyfile(src_audio_path, target_audio_path)
                 else:
                     print(f'> Audio file "{target_audio_path}" already exists.')
 
                 src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-                src_jacket_path = args.jacket_folder + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+                src_jacket_path = args.jacket_dir + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
 
                 if os.path.exists(src_jacket_path):
                     target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'

@@ -413,7 +413,8 @@ class Vox:
                 return cls.END_POSITION
             elif token == 'SOUND ID START':
                 return cls.SOUND_ID
-            elif token == 'SPCONTROLLER':
+            elif token == 'SPCONTROLER' or token == 'SPCONTROLLER':
+                print('sp')
                 return cls.SPCONTROLLER
             elif token == 'TRACK AUTO TAB':
                 return None
@@ -576,7 +577,7 @@ class Vox:
 
                     self.events[((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))] = ButtonPress(button, int(splitted[1]), fx_data)
                 except ValueError:
-                    raise ButtonEventError(f'{self.state_track} is an invalid button track')
+                    print(f'> > Warning: ignoring invalid button track {self.state_track}')
 
 
     def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True):
@@ -782,7 +783,9 @@ CASES = {
     'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox',
     'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox',
     'early-version': 'data/vox_01_ifs/001_0001_albida_muryoku_1n.vox',
-    'bpm': 'data/vox_03_ifs/002_0262_hanakagerou_minamotoya_1n.vox'
+    'bpm': 'data/vox_03_ifs/002_0262_hanakagerou_minamotoya_1n.vox',
+    'encoding': 'data/vox_02_ifs/001_0121_eclair_au_chocolat_kamome_1n.vox',
+    'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox'
 }
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')

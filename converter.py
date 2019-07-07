@@ -429,7 +429,6 @@ class Vox:
             elif token == 'SOUND ID START':
                 return cls.SOUND_ID
             elif token == 'SPCONTROLER' or token == 'SPCONTROLLER':
-                print('sp')
                 return cls.SPCONTROLLER
             elif token == 'TRACK AUTO TAB':
                 return None

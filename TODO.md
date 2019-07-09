@@ -1,15 +1,8 @@
-[ ] BPM changes
-
-[ ] Time signature changes
-
-[ ] FX hold effects
-
-[ ] Metadata
-
-[ ] Preview
-
-[ ] Camera
-
-[ ] VOL effect configuration
-
-[x] Out of bounds lasers
+- [x] BPM changes
+- [x] Time signature changes
+- [x] FX hold effects (version >= 4)
+- [x] Metadata (fix weird characters for accented latin)
+- [x] Preview *(requires patched USC)*
+- [x] Camera *(still needs tweaking?)*
+- [ ] VOL effect configuration
+- [x] Out of bounds lasers

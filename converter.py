@@ -19,6 +19,17 @@ pprint_prefix = ''
 def pprint(*args, **kwargs):
     print('(' + pprint_prefix + ') '.join(map(str, args)), **kwargs)
 
+class RevMap:
+    def __init__(self, mapping):
+        self.mapping = mapping
+        self._rev = {v: k for k, v in mapping.items()}
+
+    def get(self, k):
+        return self.mapping.get(k)
+
+    def rev(self, k):
+        return self._rev.get(k)
+
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
 class VoxNameError(Exception):
@@ -91,6 +102,24 @@ class CameraParam(Enum):
     RAD_I = auto()
 
 class KshootEffect(Enum):
+    @classmethod
+    @cache(maxsize=None)
+    def _name(cls):
+        return RevMap({
+            cls.RETRIGGER: 'Retrigger',
+            cls.GATE: 'Gate',
+            cls.FLANGER: 'Flanger',
+            cls.TAPESTOP: 'TapeStop',
+            cls.SIDECHAIN: 'SideChain',
+            cls.WOBBLE: 'Wobble',
+            cls.BITCRUSHER: 'BitCrusher',
+            cls.ECHO: 'Echo',
+            cls.PITCHSHIFT: 'PitchShift'
+        })
+
+    def to_ksh_simple_name(self):
+        return self._name().get(self)
+
     def to_ksh_name(self, params):
         if self == KshootEffect.RETRIGGER:
             division = 8 if params is None else params['division']
@@ -172,6 +201,128 @@ class KshootEffect(Enum):
     ECHO = auto()
     SIDECHAIN = auto()
 
+class KshEffectDefine:
+    def __init__(self):
+        self.effect = None
+        self.main_param = None
+        self.params = {}
+
+    def to_define_line(self, index):
+        param_str = ''
+        for k, v in self.params.items():
+            param_str += f';{k}={v}'
+        return f'#define_fx {index} type={self.effect.to_ksh_simple_name()}{param_str}'
+
+    def fx_change(self, index):
+        extra = f';{self.main_param}' if self.main_param is not None else ''
+        return f'{index}{extra}'
+
+    @classmethod
+    def from_effect_info_line(cls, index, line):
+        splitted = line.replace('\t', '').split(',')
+
+        define = KshEffectDefine()
+        define.index = index
+        define.effect = KshootEffect.PITCHSHIFT # TEMP
+
+        if splitted[0] == '1' or splitted[0] == '8':
+            # Retrigger / echo (they're pretty much the same thing)
+            define.effect = KshootEffect.RETRIGGER
+
+            if float(splitted[3]) < 0:
+                define.main_param = float(splitted[1]) * 16
+                define.params['waveLength'] = f"1/{define.main_param}"
+                define.params['updatePeriod'] = "1/18"
+            else:
+                define.main_param = (4 / float(splitted[3])) * float(splitted[1])
+                define.params['waveLength'] = f'1/{define.main_param}'
+                define.params['updatePeriod'] = f"1/{4 / float(splitted[3])}"
+            rate = f'{int(float(splitted[5]) * 100)}%'
+            feedback_level = f'{int(float(splitted[4]) * 100)}%'
+
+            define.params['mix'] = f'0%>{int(float(splitted[2]))}%'
+
+            if feedback_level != '100%':
+                define.effect = KshootEffect.ECHO
+                define.params['feedbackLevel'] = feedback_level
+                if splitted[0] == '8':
+                    define.params['updatePeriod'] = 0
+                define.params['updateTrigger'] = 'off>on' if splitted[0] == '8' else 'off'
+            elif float(splitted[3]) < 0:
+                define.params['rate'] = rate
+            else:
+                define.params['rate'] = rate
+                if splitted[0] == '8':
+                    define.params['updateTrigger'] = 'off>on'
+                    define.params['updatePeriod'] = 0
+
+        elif splitted[0] == '2':
+            # Gate
+            define.effect = KshootEffect.GATE
+            define.main_param = (2 / float(splitted[3])) * float(splitted[2])
+            define.params['waveLength'] = f'1/{define.main_param}'
+            define.params['mix'] = f'0%>{math.floor(float(splitted[1]))}%' # TODO Should this be here
+
+        elif splitted[0] == '3':
+            # Flanger
+            define.effect = KshootEffect.FLANGER
+            define.params['delay'] = f'{int(float(splitted[2]) * 100)}samples'
+            define.params['depth'] = f'{int(float(splitted[3]) * 100)}samples'
+            define.params['volume'] = f'{int(float(splitted[1]))}%'
+
+        elif splitted[0] == '4':
+            # Tape stop
+            define.effect = KshootEffect.TAPESTOP
+            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
+            speed = float(splitted[3]) * float(splitted[2]) * 9.8125
+            if speed > 50:
+                speed = 50
+            else:
+                speed = int(speed)
+            define.main_param = speed
+            define.params['speed'] = f'{define.main_param}%'
+
+        elif splitted[0] == '5':
+            # Sidechain
+            define.effect = KshootEffect.SIDECHAIN
+            define.main_param = int(float(splitted[2]) * 2)
+            define.params['period'] = f'1/{define.main_param}'
+
+        elif splitted[0] == '6':
+            # Wobble
+            define.effect = KshootEffect.WOBBLE
+            define.main_param = int(float(splitted[6])) * 4
+            define.params['waveLength'] = f'1/{define.main_param}'
+            define.params['loFreq'] = f'{int(float(splitted[4]))}Hz'
+            define.params['hiFreq'] = f'{int(float(splitted[5]))}Hz'
+            define.params['Q'] = str(float(splitted[7]))
+            define.params['mix'] = f'0%>{int(float(splitted[3]))}%'
+
+        elif splitted[0] == '7':
+            # Bitcrusher
+            define.effect = KshootEffect.BITCRUSHER
+            define.main_param = int(splitted[2])
+            define.params['reduction'] = f'{define.main_param}samples'
+            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
+
+        elif splitted[0] == '9':
+            # Pitchshift
+            define.effect = KshootEffect.PITCHSHIFT
+            define.main_param = int(float(splitted[2]))
+            define.params['pitch'] = str(define.main_param)
+            define.params['mix'] = f'0%>{int(float(splitted[1]))}'
+
+        elif splitted[0] == '11':
+            define.effect = KshootEffect.WOBBLE
+            define.params['loFreq'] = f'{int(float(splitted[3]))}Hz'
+            define.params['hiFreq'] = f'{define.params["loFreq"]}Hz'
+            define.params['Q'] = '1.4'
+
+        else:
+            print(f'unsupported effect define ID {splitted[0]}')
+
+        return define
+
 class Button(Enum):
     BT_A = auto()
     BT_B = auto()
@@ -215,7 +366,7 @@ class Button(Enum):
             return 6
 
 class ButtonPress:
-    def __init__(self, button: Button, duration: int, effect: (KshootEffect, dict)):
+    def __init__(self, button: Button, duration: int, effect):
         self.button = button
         self.duration = duration
         self.effect = effect
@@ -267,17 +418,6 @@ class LaserSlam:
     def __init__(self, start: LaserNode, end: LaserNode):
         self.start = start
         self.end = end
-
-class RevMap:
-    def __init__(self, mapping):
-        self.mapping = mapping
-        self._rev = {v: k for k, v in mapping.items()}
-
-    def get(self, k):
-        return self.mapping.get(k)
-
-    def rev(self, k):
-        return self._rev.get(k)
 
 class Difficulty(Enum):
     NOVICE = 0
@@ -428,6 +568,8 @@ class Vox:
                 return cls.END_POSITION
             elif token == 'SOUND ID START':
                 return cls.SOUND_ID
+            elif token == 'FXBUTTON EFFECT INFO':
+                return cls.FXBUTTON_EFFECT
             elif token == 'SPCONTROLER' or token == 'SPCONTROLLER':
                 return cls.SPCONTROLLER
             elif token == 'TRACK AUTO TAB':
@@ -442,6 +584,7 @@ class Vox:
         BEAT_INFO = auto()
         END_POSITION = auto()
         SOUND_ID = auto()
+        FXBUTTON_EFFECT = auto()
         TRACK = auto()
         SPCONTROLLER = auto()
 
@@ -450,7 +593,8 @@ class Vox:
         self.game_id = 0
         self.song_id = 0
         self.vox_version = 0
-        self.defines = {}
+        self.vox_defines = {} # defined in the vox file
+        self.effect_defines = {} # will be defined in the ksh file
         self.end = None
         self.events = {}
 
@@ -538,7 +682,7 @@ class Vox:
             return res
         return self._events_spcontroller[control]
 
-    def process_state(self, line, filename=None, line_no=None):
+    def process_state(self, line, section_line_no, filename=None, line_no=None):
         splitted = line.split('\t')
 
         if self.state == self.State.FORMAT_VERSION:
@@ -559,6 +703,14 @@ class Vox:
 
         elif self.state == self.State.SOUND_ID:
             raise ParserError('non-define line encountered in SOUND ID', filename, line_no)
+
+        elif self.state == self.State.FXBUTTON_EFFECT:
+            if vox.vox_version < 6:
+                self.effect_defines[section_line_no - 1] = KshEffectDefine.from_effect_info_line(section_line_no, line)
+            else:
+                if (section_line_no - 1) % 3 == 0:
+                    index = int(section_line_no / 3)
+                    self.effect_defines[index] = KshEffectDefine.from_effect_info_line(index, line)
 
         elif self.state == self.State.SPCONTROLLER:
             param = CameraParam.from_vox_name(splitted[1])
@@ -602,12 +754,14 @@ class Vox:
                     if button.is_fx():
                         # Process effect assignment.
                         if self.vox_version < 4:
-                            sound_id = int(splitted[3]) if splitted[3].isdigit() else int(self.defines[splitted[3]])
+                            sound_id = int(splitted[3]) if splitted[3].isdigit() else int(self.vox_defines[splitted[3]])
                             fx_res = KshootEffect.from_pre_v4_vox_sound_id(sound_id)
                             if type(fx_res) is tuple:
                                 fx_data = (fx_res[0], fx_res[1])
                             else:
                                 fx_data = (fx_res, None)
+                        else:
+                            fx_data = int(splitted[2]) - 2
 
                     self.events[((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))] = ButtonPress(button, int(splitted[1]), fx_data)
                 except ValueError:
@@ -710,8 +864,8 @@ ver=167''', file=file)
                             press: ButtonPress = self.events_track(i.to_track_num())[now]
                             if press.duration != 0 and i.is_fx():
                                 letter = 'l' if i == Button.FX_L else 'r'
-                                effect_string = press.effect[0].to_ksh_name(press.effect[1]) if press.effect is not None else \
-                                    KshootEffect.choose_random().to_ksh_name(None)
+                                effect_string = f'{self.effect_defines[press.effect].fx_change(press.effect)}' if type(press.effect) is int else \
+                                    press.effect[0].to_ksh_name(press.effect[1])
                                 buffer.meta.append(f'fx-{letter}={effect_string}')
 
                             if press.duration != 0:
@@ -760,6 +914,9 @@ ver=167''', file=file)
 
             print('--', file=file)
 
+        for k, v in self.effect_defines.items():
+            print(v.to_define_line(k), file=file)
+
     @classmethod
     def from_file(cls, path):
         parser = Vox()
@@ -793,6 +950,7 @@ ver=167''', file=file)
 
     def parse(self):
         line_no = 1
+        section_line_no = 0
         for line in self.voxfile:
             line = line.strip()
             if line.startswith('//'):
@@ -806,6 +964,7 @@ ver=167''', file=file)
                     self.state_track = int(token_state[1])
                 else:
                     self.state = token_state
+                section_line_no = 0
             elif line.startswith('define'):
                 splitted = line.split('\t')
 
@@ -815,9 +974,10 @@ ver=167''', file=file)
                 if len(splitted) != 3:
                     raise ParserError('illegal number of operands in define statement', self.voxfile, line_no)
 
-                self.defines[splitted[1]] = splitted[2]
+                self.vox_defines[splitted[1]] = splitted[2]
             elif self.state is not None:
-                self.process_state(line)
+                self.process_state(line, section_line_no)
+            section_line_no += 1
             line_no += 1
         self.finalized = True
 
@@ -855,7 +1015,8 @@ CASES = {
     'encoding': 'data/vox_02_ifs/001_0121_eclair_au_chocolat_kamome_1n.vox',
     'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox',
     'diff-preview': 'data/vox_01_ifs/001_0026_gorilla_pinocchio_4i.vox',
-    'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox'
+    'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox',
+    'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox'
 }
 
 def copy_preview(vox, song_dir):
@@ -943,7 +1104,7 @@ if args.convert:
             try:
                 vox.parse()
             except Exception as e:
-                print('> Parsing vox file failed with ' + str(e))
+                print(f'> Parsing vox file failed with\n{traceback.format_exc()}')
                 continue
 
             game_dir = f'out/{str(vox.game_id).zfill(3)}'

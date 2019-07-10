@@ -1,8 +1,10 @@
 - [x] BPM changes
 - [x] Time signature changes
 - [x] FX hold effects (version >= 4)
-- [x] Metadata (fix weird characters for accented latin)
+- [x] Metadata
 - [x] Preview *(requires patched USC)*
 - [x] Camera *(still needs tweaking?)*
+- [ ] Tilt effect
 - [ ] VOL effect configuration
 - [x] Out of bounds lasers
+- [ ] Tweak FX to match game

@@ -91,6 +91,8 @@ class CameraParam(Enum):
             return 'zoom_top'
         elif self == self.RAD_I:
             return 'zoom_bottom'
+        else:
+            return None
 
     def scaling_factor(self):
         if self == self.ROT_X:
@@ -223,7 +225,7 @@ class KshEffectDefine:
 
         define = KshEffectDefine()
         define.index = index
-        define.effect = KshootEffect.WOBBLE
+        define.effect = KshootEffect.FLANGER
 
         if splitted[0] == '1' or splitted[0] == '8':
             # Retrigger / echo (they're pretty much the same thing)
@@ -269,6 +271,7 @@ class KshEffectDefine:
             define.params['delay'] = f'{int(float(splitted[2]) * 100)}samples'
             define.params['depth'] = f'{int(float(splitted[3]) * 100)}samples'
             define.params['feedback'] = f'{int(splitted[4])}%' # TODO Not sure about this one
+            define.params['period'] = str(float(splitted[5]))
             define.params['volume'] = f'{min(int(float(splitted[1]) * 1.33), 100)}%' # Normally no multiplier but i like this
 
         elif splitted[0] == '4':
@@ -746,7 +749,8 @@ class Vox:
 
         elif self.state == self.State.SPCONTROLLER:
             param = CameraParam.from_vox_name(splitted[1])
-            self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = float(splitted[4])
+            if param is not None:
+                self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = float(splitted[4])
 
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:

@@ -480,6 +480,30 @@ class Difficulty(Enum):
         else:
             return 5
 
+class TiltMode(Enum):
+    NORMAL = auto()
+    BIGGEST = auto()
+    KEEP_BIGGEST = auto()
+
+    @classmethod
+    def from_vox_id(cls, id):
+        if id == 0:
+            return cls.NORMAL
+        elif id == 1:
+            return cls.BIGGEST
+        elif id == 2:
+            return cls.KEEP_BIGGEST
+        return None
+
+    def to_ksh_name(self):
+        if self == self.NORMAL:
+            return 'normal'
+        elif self == self.BIGGEST:
+            return 'biggest'
+        elif self == self.KEEP_BIGGEST:
+            return 'keep_biggest'
+        return None
+
 class ParserError(Exception):
     """ Exception raised when the Vox parser encounters invalid syntax. """
     def __init__(self, message, filename, line):
@@ -562,6 +586,8 @@ class Vox:
                 return cls.BPM
             elif token == 'BPM INFO':
                 return cls.BPM_INFO
+            elif token == 'TILT MODE INFO':
+                return cls.TILT_INFO
             elif token == 'BEAT INFO':
                 return cls.BEAT_INFO
             elif token == 'END POSISION' or token == 'END POSITION':
@@ -581,6 +607,7 @@ class Vox:
         FORMAT_VERSION = auto()
         BPM = auto()
         BPM_INFO = auto()
+        TILT_INFO = auto()
         BEAT_INFO = auto()
         END_POSITION = auto()
         SOUND_ID = auto()
@@ -697,6 +724,9 @@ class Vox:
 
         elif self.state == self.State.BPM_INFO:
             self.events[(EventKind.BPM, Timing.from_time_str(splitted[0]))] = splitted[1]
+
+        elif self.state == self.State.TILT_INFO:
+            self.events[(EventKind.TILTMODE, Timing.from_time_str(splitted[0]))] = TiltMode.from_vox_id(int(splitted[1]))
 
         elif self.state == self.State.END_POSITION:
             self.end = Timing.from_time_str(line)
@@ -851,6 +881,9 @@ ver=167''', file=file)
                         if now in self.events_spcontroller(cam_param):
                             the_change = self.events_spcontroller(cam_param)[now]
                             buffer.meta.append(f'{cam_param.to_ksh_name()}={int(the_change * cam_param.scaling_factor())}')
+
+                    if now in self.events_tiltmode():
+                        buffer.meta.append(f'tilt={self.events_tiltmode()[now].to_ksh_name()}')
 
                     for i in list(Button):
                         if i in holds:
@@ -1016,7 +1049,8 @@ CASES = {
     'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox',
     'diff-preview': 'data/vox_01_ifs/001_0026_gorilla_pinocchio_4i.vox',
     'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox',
-    'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox'
+    'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox',
+    'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox'
 }
 
 def copy_preview(vox, song_dir):

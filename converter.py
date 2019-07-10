@@ -223,18 +223,18 @@ class KshEffectDefine:
 
         define = KshEffectDefine()
         define.index = index
-        define.effect = KshootEffect.PITCHSHIFT # TEMP
+        define.effect = KshootEffect.WOBBLE
 
         if splitted[0] == '1' or splitted[0] == '8':
             # Retrigger / echo (they're pretty much the same thing)
             define.effect = KshootEffect.RETRIGGER
 
             if float(splitted[3]) < 0:
-                define.main_param = float(splitted[1]) * 16
+                define.main_param = int(float(splitted[1]) * 16)
                 define.params['waveLength'] = f"1/{define.main_param}"
                 define.params['updatePeriod'] = "1/18"
             else:
-                define.main_param = (4 / float(splitted[3])) * float(splitted[1])
+                define.main_param = int((4 / float(splitted[3])) * float(splitted[1]))
                 define.params['waveLength'] = f'1/{define.main_param}'
                 define.params['updatePeriod'] = f"1/{4 / float(splitted[3])}"
             rate = f'{int(float(splitted[5]) * 100)}%'
@@ -261,14 +261,15 @@ class KshEffectDefine:
             define.effect = KshootEffect.GATE
             define.main_param = (2 / float(splitted[3])) * float(splitted[2])
             define.params['waveLength'] = f'1/{define.main_param}'
-            define.params['mix'] = f'0%>{math.floor(float(splitted[1]))}%' # TODO Should this be here
+            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
 
         elif splitted[0] == '3':
             # Flanger
             define.effect = KshootEffect.FLANGER
             define.params['delay'] = f'{int(float(splitted[2]) * 100)}samples'
             define.params['depth'] = f'{int(float(splitted[3]) * 100)}samples'
-            define.params['volume'] = f'{int(float(splitted[1]))}%'
+            define.params['feedback'] = f'{int(splitted[4])}%' # TODO Not sure about this one
+            define.params['volume'] = f'{min(int(float(splitted[1]) * 1.33), 100)}%' # Normally no multiplier but i like this
 
         elif splitted[0] == '4':
             # Tape stop
@@ -314,8 +315,9 @@ class KshEffectDefine:
 
         elif splitted[0] == '11':
             define.effect = KshootEffect.WOBBLE
+            define.main_param = 1
             define.params['loFreq'] = f'{int(float(splitted[3]))}Hz'
-            define.params['hiFreq'] = f'{define.params["loFreq"]}Hz'
+            define.params['hiFreq'] = define.params["loFreq"]
             define.params['Q'] = '1.4'
 
         else:
@@ -775,10 +777,10 @@ class Vox:
             jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
 
         if track_basename is None:
-            track_basename = 'track.mp3'
+            track_basename = f'track{AUDIO_EXTENSION}'
 
         if preview_basename is None:
-            preview_basename = 'preview.mp3'
+            preview_basename = f'preview{AUDIO_EXTENSION}'
 
         print(f'''title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
@@ -1016,19 +1018,18 @@ CASES = {
     'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox',
     'diff-preview': 'data/vox_01_ifs/001_0026_gorilla_pinocchio_4i.vox',
     'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox',
-    'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox'
+    'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox',
+    'bug-fx': 'data/vox_13_ifs/004_1208_coldapse_aoi_3e.vox'
 }
 
 def copy_preview(vox, song_dir):
-    split = os.path.splitext
-
-    output_path = f'{song_dir}/preview.mp3'
-    preview_path = f'{args.preview_dir}/{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_pre.mp3'
-    diff_preview_path = f'{split(preview_path)[0]}_{vox.diff_token()}{split(preview_path)[1]}'
+    output_path = f'{song_dir}/preview{AUDIO_EXTENSION}'
+    preview_path = f'{args.preview_dir}/{vox.song_id}{AUDIO_EXTENSION}'
+    diff_preview_path = f'{splitx(preview_path)[0]}_{vox.diff_token()}{AUDIO_EXTENSION}'
 
     if os.path.exists(diff_preview_path):
         preview_path = diff_preview_path
-        output_path = f'{split(output_path)[0]}_{vox.diff_token()}{split(output_path)[1]}'
+        output_path = f'{splitx(output_path)[0]}_{vox.diff_token()}{splitx(output_path)[1]}'
 
     if os.path.exists(output_path):
         print(f'> Preview file "{output_path}" already exists.')
@@ -1046,13 +1047,14 @@ argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-m', '--metadata-only', action='store_true')
 argparser.add_argument('-p', '--preview-only', action='store_true')
-argparser.add_argument('-A', '--audio-dir', default='D:\\SDVX-Extract (V0)')
-argparser.add_argument('-J', '--jacket-dir', default='D:\\SDVX-Extract (jk)')
-argparser.add_argument('-P', '--preview-dir', default='D:\\SDVX-Extract (preview)')
+argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
+argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
+argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')
 argparser.add_argument('-n', '--no-media', action='store_true')
 argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
+AUDIO_EXTENSION = '.ogg'
 ID_TO_AUDIO = {}
 
 if not args.no_media:
@@ -1063,7 +1065,8 @@ if not args.no_media:
             if os.path.basename(f) == 'jk':
                 continue
             try:
-                ID_TO_AUDIO[int(os.path.basename(f).split(' ')[0])] = f
+                if splitx(f)[1] == '.ogg':
+                    ID_TO_AUDIO[int(splitx(os.path.basename(f))[0])] = f
             except ValueError as e:
                 print(e)
     print(f'{len(ID_TO_AUDIO)} songs processed.')
@@ -1107,11 +1110,7 @@ if args.convert:
                 print(f'> Parsing vox file failed with\n{traceback.format_exc()}')
                 continue
 
-            game_dir = f'out/{str(vox.game_id).zfill(3)}'
-            if not os.path.isdir(game_dir):
-                print(f'> Making game directory "{game_dir}".')
-                os.mkdir(game_dir)
-            song_dir = f'{game_dir}/{vox.get_metadata("ascii")}'
+            song_dir = f'out/{vox.get_metadata("ascii")}'
             if not os.path.isdir(song_dir):
                 print(f'> Creating song directory "{song_dir}".')
                 os.mkdir(song_dir)
@@ -1126,13 +1125,12 @@ if args.convert:
 
             if not args.no_media:
 
-                target_audio_path = song_dir + '/track.mp3'
+                target_audio_path = song_dir + '/track.ogg'
 
                 src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
 
                 if vox.difficulty == Difficulty.INFINITE:
                     src_audio_path_diff = f'{splitx(src_audio_path)[0]} [INF]{splitx(src_audio_path)[1]}'
-                    print(src_audio_path_diff)
                     if os.path.exists(src_audio_path_diff):
                         print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
                         src_audio_path = src_audio_path_diff

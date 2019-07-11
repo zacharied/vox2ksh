@@ -717,6 +717,9 @@ class Vox:
     def process_state(self, line, section_line_no, filename=None, line_no=None):
         splitted = line.split('\t')
 
+        if line == '':
+            return
+
         if self.state == self.State.FORMAT_VERSION:
             self.vox_version = int(line)
 
@@ -1057,7 +1060,8 @@ CASES = {
     'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox',
     'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox',
     'bug-fx': 'data/vox_13_ifs/004_1208_coldapse_aoi_3e.vox',
-    'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox'
+    'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
+    'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox'
 }
 
 def copy_preview(vox, song_dir):

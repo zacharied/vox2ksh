@@ -746,9 +746,13 @@ class Vox:
             if vox.vox_version < 6:
                 self.effect_defines[section_line_no - 1] = KshEffectDefine.from_effect_info_line(section_line_no, line)
             else:
-                if (section_line_no - 1) % 3 == 0:
-                    index = int(section_line_no / 3)
-                    self.effect_defines[index] = KshEffectDefine.from_effect_info_line(index, line)
+                if (section_line_no - 1) % 3 < 2:
+                    # The < 2 condition will allow the second line to override the first.
+                    if line.isspace():
+                        raise ParserError('fx effect info line is blank')
+                    elif splitted[0] != '0,':
+                        index = int(section_line_no / 3)
+                        self.effect_defines[index] = KshEffectDefine.from_effect_info_line(index, line)
 
         elif self.state == self.State.SPCONTROLLER:
             param = CameraParam.from_vox_name(splitted[1])
@@ -1061,6 +1065,7 @@ CASES = {
     'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox',
     'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox',
     'bug-fx': 'data/vox_13_ifs/004_1208_coldapse_aoi_3e.vox',
+    'double-fx': 'data/vox_12_ifs/004_1136_freedomdive_xi_2a.vox',
     'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
     'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox'
 }

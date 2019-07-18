@@ -15,9 +15,9 @@ import argparse
 TICKS_PER_BEAT = 48
 
 exceptions_file = None
-def write_to_exceptions(filename, is_critical=False):
+def write_to_exceptions(filename, line_no=None, is_input_error=False, is_critical=False):
     if exceptions_file is not None:
-        print(f'{"*** " if is_critical else ""}{filename}:\n{traceback.format_exc()}', file=exceptions_file)
+        print(f'{"[IN]" if is_input_error else "[OUT]"} {"*** " if is_critical else ""}{filename}{":" + str(line_no) if line_no is not None else ""}:\n{traceback.format_exc()}', file=exceptions_file)
 
 class RevMap:
     def __init__(self, mapping):
@@ -32,18 +32,33 @@ class RevMap:
 
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
-class VoxNameError(Exception):
-    pass
-class MetadataFindError(Exception):
-    pass
-class AudioFileFindError(Exception):
-    pass
-class LaserNodeFormatError(Exception):
-    pass
-class ButtonEventError(Exception):
-    pass
-class KshConversionError(Exception):
-    pass
+class VoxLoadError(Exception):
+    def __init__(self, file, msg):
+        self.file = file
+        self.msg = msg
+
+    def __str__(self):
+        return f'{self.file}: {self.msg}'
+
+class VoxParseError(Exception):
+    def __init__(self, file, section, line, msg):
+        self.file = file
+        self.section = section
+        self.line = line
+        self.msg = msg
+
+    def __str__(self):
+        return f'{self.file}:{self.line} ({self.section}): {self.msg}'
+
+class KshConvertError(Exception):
+    def __init__(self, infile, outfile, line, msg):
+        self.infile = infile
+        self.outfile = outfile
+        self.line = line
+        self.msg = msg
+
+    def __str__(self):
+        return f'{self.infile}  ->  {self.outfile}:{self.line}: {self.msg}'
 
 class Timing:
     def __init__(self, measure, beat, offset):
@@ -56,10 +71,9 @@ class Timing:
         """ Create a Timing from the format string that appears in the first column of vox tracks. """
         splitted = time.split(',')
         if int(splitted[2]) >= TICKS_PER_BEAT:
-            raise ValueError('offset greater than maximum')
+            raise ValueError(f'offset of {int(splitted[2])} is greater than maximum')
         return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
 
-    # TODO I think most of these could be implemented better.
     def __eq__(self, other):
         return self.measure == other.measure and self.beat == other.beat and self.offset == other.offset
 
@@ -83,8 +97,14 @@ class CameraParam(Enum):
             return cls.ROT_X
         elif vox_name == 'CAM_Radi':
             return cls.RAD_I
-        else:
-            return None
+        elif vox_name == 'Realize':
+            return cls.REALIZE
+        elif vox_name == 'AIRL_ScaX':
+            return cls.AIRL_SCAX
+        elif vox_name == 'AIRR_ScaX':
+            return cls.AIRR_SCAX
+
+        raise ValueError(f'invalid camera param "{vox_name}"')
 
     def to_ksh_name(self):
         if self == self.ROT_X:
@@ -99,23 +119,36 @@ class CameraParam(Enum):
             return 150.0
         elif self == self.RAD_I:
             return -150.0
+        return None
 
     ROT_X = auto()
     RAD_I = auto()
+    REALIZE = auto()
+    AIRL_SCAX = auto()
+    AIRR_SCAX = auto()
+
+def spcontroller_line_is_normal(param, splitted):
+    cell = lambda i: splitted[i].strip()
+    if param == CameraParam.REALIZE:
+        if cell(2) == '3':
+            return cell(4) == '36.12' and cell(5) == '60.12' and cell(6) == '110.12' and cell(7) == '0.00'
+        elif cell(2) == '4':
+            return cell(4) == '0.62' and cell(5) == '0.72' and cell(6) == '1.03' and cell(7) == '0.00'
+    return True
+    # TODO Other params maybe
 
 class KshootFilter(Enum):
     @classmethod
-    def from_vox_id(cls, id):
-        if id == 0:
+    def from_vox_filter_id(cls, filter_id):
+        if filter_id == 0:
             return cls.PEAK
-        elif id == 2:
+        elif filter_id == 2:
             return cls.LOWPASS
-        elif id == 4:
+        elif filter_id == 4:
             return cls.HIGHPASS
-        elif id == 5:
+        elif filter_id == 5:
             return cls.BITCRUSH
-
-        raise KshConversionError(f'unrecognized vox filter effect id {id}')
+        raise ValueError(f'unrecognized vox filter id {filter_id}')
 
     def to_ksh_name(self):
         if self == self.PEAK:
@@ -124,8 +157,9 @@ class KshootFilter(Enum):
             return 'lpf1'
         elif self == self.HIGHPASS:
             return 'hpf1'
-        elif self == self.PEAK:
-            return 'peak'
+        elif self == self.BITCRUSH:
+            # TODO is this right?
+            return 'bitcrush'
 
     PEAK = auto()
     LOWPASS = auto()
@@ -150,69 +184,6 @@ class KshootEffect(Enum):
 
     def to_ksh_simple_name(self):
         return self._name().get(self)
-
-    def to_ksh_name(self, params):
-        if self == KshootEffect.RETRIGGER:
-            division = 8 if params is None else params['division']
-            return f'Retrigger;{division}'
-
-        elif self == KshootEffect.GATE:
-            division = 8 if params is None else params['division']
-            return f'Gate;{division}'
-
-        elif self == KshootEffect.FLANGER:
-            return 'Flanger'
-
-        elif self == KshootEffect.BITCRUSHER:
-            degree = 10 if params is None else params['degree']
-            return f'BitCrusher;{degree}'
-
-        elif self == KshootEffect.PHASER:
-            return 'Phaser'
-
-        elif self == KshootEffect.WOBBLE:
-            division = 12 if params is None else params['division']
-            return f'Wobble;{division}'
-
-        elif self == KshootEffect.PITCHSHIFT:
-            tones = 12 if params is None else params['tones']
-            return f'PitchShift;{tones}'
-
-        elif self == KshootEffect.TAPESTOP:
-            speed = 50 if params is None else params['speed']
-            return f'TapeStop;{speed}'
-
-        elif self == KshootEffect.ECHO:
-            # TODO Figure out echo parameters.
-            x = 4 if params is None else params['x']
-            y = 60 if params is None else params['y']
-            return f'Echo;{x};{y}'
-
-        elif self == KshootEffect.SIDECHAIN:
-            return 'SideChain'
-
-    @classmethod
-    def from_pre_v4_vox_sound_id(cls, sound_id):
-        if sound_id < 2:
-            if sound_id == 1:
-                print('A chart used 0bt_2mix. Please make sure the chart was "pulse_laser_higedriver_1n".')
-            return None
-        elif sound_id == 2:
-            return cls.RETRIGGER, {"division": 8}
-        elif sound_id == 3:
-            return cls.RETRIGGER, {"division": 16}
-        elif sound_id == 4:
-            return cls.GATE, {"division": 16}
-        elif sound_id == 5:
-            return cls.FLANGER
-        elif sound_id == 6:
-            return cls.RETRIGGER, {"division": 32}
-        elif sound_id == 7:
-            return cls.GATE, {"division": 8}
-        elif sound_id == 8:
-            return cls.PITCHSHIFT
-        else:
-            raise ValueError(f'Pre-v4 vox sound id {sound_id} does not exist.')
 
     @classmethod
     def choose_random(cls):
@@ -249,11 +220,45 @@ class KshEffectDefine:
         return f'{index}{extra}'
 
     @classmethod
-    def from_effect_info_line(cls, index, line):
+    def from_pre_v4_vox_sound_id(cls, sound_id):
+        define = cls.default_effect()
+
+        if sound_id == 2:
+            define.effect = KshootEffect.RETRIGGER
+            define.main_param = '1/8'
+        elif sound_id == 3:
+            define.effect = KshootEffect.RETRIGGER
+            define.main_param = '1/16'
+        elif sound_id == 4:
+            define.effect = KshootEffect.GATE
+            define.main_param = '1/16'
+        elif sound_id == 5:
+            define.effect = KshootEffect.FLANGER # TODO Tweak
+        elif sound_id == 6:
+            define.effect = KshootEffect.RETRIGGER
+            define.main_param = '1/32'
+        elif sound_id == 7:
+            define.effect = KshootEffect.GATE
+            define.main_param = '1/8'
+        elif sound_id == 8:
+            define.effect = KshootEffect.PITCHSHIFT
+            define.main_param = '8' # TODO Tweak
+        elif sound_id > 8:
+            raise ValueError(f'old vox sound id {sound_id} does not exist')
+
+        return define
+
+    @classmethod
+    def default_effect(cls):
+        define = KshEffectDefine()
+        define.effect = KshootEffect.FLANGER
+        return define
+
+    @classmethod
+    def from_effect_info_line(cls, line):
         splitted = line.replace('\t', '').split(',')
 
         define = KshEffectDefine()
-        define.index = index
         define.effect = KshootEffect.FLANGER
 
         if splitted[0] == '1' or splitted[0] == '8':
@@ -353,7 +358,7 @@ class KshEffectDefine:
             define.params['Q'] = '1.4'
 
         else:
-            print(f'unsupported effect define ID {splitted[0]}')
+            raise ValueError(f'effect define id {splitted[0]} is not supported')
 
         return define
 
@@ -382,8 +387,10 @@ class Button(Enum):
             return cls.BT_D
         elif num == 7:
             return cls.FX_R
+        elif num == 9:
+            return None
         else:
-            raise ValueError('invalid track number for button: {}'.format(num))
+            raise ValueError(f'invalid track number for button: {num}')
 
     def to_track_num(self):
         if self == self.FX_L:
@@ -437,6 +444,9 @@ class LaserNode:
         self.node_type = builder.node_type
         self.range = builder.range
         self.filter = builder.filter
+
+        if self.position < 0 or self.position > 127:
+            raise ValueError(f'position {self.position} is out of bounds')
 
     def position_ksh(self):
         """ Convert the position from the 7-bit scale to whatever the hell KSM is using. """
@@ -511,12 +521,13 @@ class Difficulty(Enum):
             return 2
         elif self == self.EXHAUST:
             return 3
-        elif self == self.MAXIMUM:
+        elif self == self.INFINITE:
             return 4
         else:
             return 5
 
 class TiltMode(Enum):
+    # TODO Tweak -- is biggest correct?
     NORMAL = auto()
     BIGGEST = auto()
     KEEP_BIGGEST = auto()
@@ -540,24 +551,12 @@ class TiltMode(Enum):
             return 'keep_biggest'
         return None
 
-class ParserError(Exception):
-    """ Exception raised when the Vox parser encounters invalid syntax. """
-    def __init__(self, message, filename, line):
-        super().__init__(f'({filename}:{str(line)} {message}')
-
 class EventKind(Enum):
     TRACK = auto()
     TIMESIG = auto()
     BPM = auto()
     TILTMODE = auto()
     SPCONTROLLER = auto()
-
-class EventsOfType:
-    def __init__(self, event_filtered):
-        self.itr = dict({ key[1]: value for key, value in event_filtered.items() })
-
-    def with_time(self, timing):
-        return self.itr.get(timing)
 
 class KshLineBuf:
     class ButtonState(Enum):
@@ -678,11 +677,15 @@ class Vox:
         self._events_tiltmode = []
         self._events_spcontroller = {}
 
+        self.warnings = 0
+
+    def __str__(self):
+        return f'{self.get_metadata("ascii")} {self.diff_token()}'
+
     def diff_token(self):
         return str(self.difficulty_idx) + self.difficulty.to_letter()
 
     def get_metadata(self, tag, from_diff=False):
-        res = ''
         if from_diff:
             the_diff = None
             for diff in self.metadata.find('difficulty').iter():
@@ -690,20 +693,24 @@ class Vox:
                     the_diff = diff
                     break
             if the_diff is None:
-                raise LookupError('difficulty {} not found in the `music` element'.format(self.difficulty.to_xml_name()))
-            res = the_diff.find(tag).text.translate(METADATA_FIX)
+                raise LookupError(f'difficulty {self.difficulty.to_xml_name()} not found in the "music" element')
+            metadata = the_diff.find(tag).text.translate(METADATA_FIX)
         else:
-            res = self.metadata.find('info').find(tag).text.translate(METADATA_FIX)
+            elem = self.metadata.find('info')
+            if elem is not None:
+                metadata = self.metadata.find('info').find(tag).text.translate(METADATA_FIX)
+            else:
+                raise LookupError('no metadata found')
         for p in METADATA_FIX:
-            res = res.replace(p[0], p[1])
-        return res
+            metadata = metadata.replace(p[0], p[1])
+        return metadata
 
     def bpm_string(self):
         # TODO Make sure decimal BPM's are okay.
         if self.get_metadata('bpm_min') == self.get_metadata('bpm_max'):
             return int(int(self.get_metadata('bpm_min')) / 100)
         else:
-            return f"{int(int(self.get_metadata('bpm_min')) / 100)}-{int(int(self.get_metadata('bpm_max')) / 100)}"
+            return f'{int(int(self.get_metadata("bpm_min")) / 100)}-{int(int(self.get_metadata("bpm_max")) / 100)}'
 
     def events_track(self, track):
         if track not in self._events_track:
@@ -745,8 +752,10 @@ class Vox:
             return res
         return self._events_spcontroller[control]
 
-    def process_state(self, line, section_line_no, filename=None, line_no=None):
+    def process_state(self, line, line_no, section_line_no):
         splitted = line.split('\t')
+
+        filename = self.voxfile.name
 
         if line == '':
             return
@@ -765,30 +774,46 @@ class Vox:
             self.events[(EventKind.BPM, Timing.from_time_str(splitted[0]))] = splitted[1]
 
         elif self.state == self.State.TILT_INFO:
-            self.events[(EventKind.TILTMODE, Timing.from_time_str(splitted[0]))] = TiltMode.from_vox_id(int(splitted[1]))
+            try:
+                self.events[(EventKind.TILTMODE, Timing.from_time_str(splitted[0]))] = TiltMode.from_vox_id(int(splitted[1]))
+            except ValueError as e:
+                raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
 
         elif self.state == self.State.END_POSITION:
             self.end = Timing.from_time_str(line)
 
         elif self.state == self.State.SOUND_ID:
-            raise ParserError('non-define line encountered in SOUND ID', filename, line_no)
+            raise VoxParseError(filename, str(self.state), line_no, 'non-define line encountered in SOUND ID')
 
         elif self.state == self.State.FXBUTTON_EFFECT:
-            if vox.vox_version < 6:
-                self.effect_defines[section_line_no - 1] = KshEffectDefine.from_effect_info_line(section_line_no, line)
+            if self.vox_version < 6:
+                try:
+                    self.effect_defines[section_line_no - 1] = KshEffectDefine.from_effect_info_line(line)
+                except ValueError as e:
+                    self.effect_defines[section_line_no - 1] = KshEffectDefine.default_effect()
+                    raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
             else:
                 if (section_line_no - 1) % 3 < 2:
                     # The < 2 condition will allow the second line to override the first.
                     if line.isspace():
-                        raise ParserError('fx effect info line is blank', filename, line_no)
+                        raise VoxParseError(filename, str(self.state), line_no, 'fx effect info line is blank')
                     elif splitted[0] != '0,':
                         index = int(section_line_no / 3)
-                        self.effect_defines[index] = KshEffectDefine.from_effect_info_line(index, line)
+                        try:
+                            self.effect_defines[index] = KshEffectDefine.from_effect_info_line(line)
+                        except ValueError as e:
+                            self.effect_defines[index] = KshEffectDefine.default_effect()
+                            raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
 
         elif self.state == self.State.SPCONTROLLER:
-            param = CameraParam.from_vox_name(splitted[1])
+            try:
+                param = CameraParam.from_vox_name(splitted[1])
+            except ValueError as e:
+                raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
             if param is not None:
                 self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = float(splitted[4])
+            if not spcontroller_line_is_normal(param, splitted):
+                raise VoxParseError(filename, str(self.state), line_no, f'line is abnormal: {line}')
 
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:
@@ -798,16 +823,14 @@ class Vox:
                 laser_node.node_type = LaserCont(int(splitted[2]))
                 if len(splitted) > 4:
                     try:
-                        laser_node.filter = KshootFilter.from_vox_id(int(splitted[4]))
-                    except KshConversionError:
-                        write_to_exceptions(f'{self.voxfile.name} {self.diff_token()}')
+                        laser_node.filter = KshootFilter.from_vox_filter_id(int(splitted[4]))
+                    except ValueError:
+                        write_to_exceptions(self.voxfile.name, line_no=line_no)
+
                 if len(splitted) > 5:
                     laser_node.range = int(splitted[5])
 
                 laser_node = LaserNode(laser_node)
-
-                if laser_node.position > 127 or laser_node.position < 0:
-                    raise LaserNodeFormatError(f'position {laser_node.position} is out of bounds')
 
                 # Check if it's a slam.
                 slam_start = self.events_track(self.state_track).get(Timing.from_time_str(splitted[0]))
@@ -830,27 +853,26 @@ class Vox:
             else:
                 try:
                     button = Button.from_track_num(self.state_track)
-                    fx_data = None
-                    if button.is_fx():
-                        # Process effect assignment.
-                        if self.vox_version < 4:
-                            sound_id = int(splitted[3]) if splitted[3].isdigit() else int(self.vox_defines[splitted[3]])
-                            fx_res = KshootEffect.from_pre_v4_vox_sound_id(sound_id)
-                            if type(fx_res) is tuple:
-                                fx_data = (fx_res[0], fx_res[1])
-                            else:
-                                fx_data = (fx_res, None)
-                        else:
-                            fx_data = int(splitted[2]) - 2
+                except ValueError as e:
+                    raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
 
-                    self.events[((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))] = ButtonPress(button, int(splitted[1]), fx_data)
-                except ValueError:
-                    write_to_exceptions(f'{self.voxfile.name} {self.diff_token()}')
+                if button is None:
+                    # Ignore track 9 buttons.
+                    return
+
+                fx_data = None
+                if button.is_fx():
+                    # Process effect assignment.
+                    if self.vox_version < 4:
+                        fx_data = int(splitted[3]) if splitted[3].isdigit() else int(self.vox_defines[splitted[3]])
+                    else:
+                        fx_data = int(splitted[2]) - 2
+
+                self.events[((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))] = ButtonPress(button, int(splitted[1]), fx_data)
 
 
-    def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
+    def write_to_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
         # First print metadata.
-        # TODO chokkaku, yomigana titles(?), background
         if jacket_idx is None:
             jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
 
@@ -892,6 +914,7 @@ ver=167''', file=file)
         slam_status = {}
         last_filter = KshootFilter.PEAK
         current_timesig = self.events_timesig()[Timing(1, 1, 0)]
+        line_num = 0
 
         measure_iter = range(self.end.measure)
         if progress_bar:
@@ -915,6 +938,8 @@ ver=167''', file=file)
                 beat = b + 1
 
                 for o in range(TICKS_PER_BEAT):
+                    line_num += 1
+
                     # However, vox offsets are 0-indexed.
 
                     now = Timing(measure, beat, o)
@@ -922,14 +947,14 @@ ver=167''', file=file)
                     buffer = KshLineBuf()
 
                     if now.beat > 1 and now.offset > 0 and now in self.events_timesig():
-                        raise KshConversionError('time signature change in the middle of a measure')
+                        raise KshConvertError(self.voxfile.name, file.name, line_num, 'time signature change in the middle of a measure')
 
                     if now in self.events_bpm():
                         buffer.meta.append(f't={str(self.events_bpm()[now]).rstrip("0").rstrip(".").strip()}')
 
                     # Camera events.
-                    for cam_param in CameraParam:
-                        if now in self.events_spcontroller(cam_param):
+                    for cam_param in list(CameraParam):
+                        if cam_param.scaling_factor() is not None and now in self.events_spcontroller(cam_param):
                             the_change = self.events_spcontroller(cam_param)[now]
                             buffer.meta.append(f'{cam_param.to_ksh_name()}={int(the_change * cam_param.scaling_factor())}')
 
@@ -959,9 +984,8 @@ ver=167''', file=file)
                                 buffer.buttons[i] = KshLineBuf.ButtonState.PRESS
 
                     for side in list(LaserSide):
-                        laser = None
                         if now in self.events_track(side.to_track_num()) and side in slam_status:
-                            raise KshConversionError('laser node created while trying to resolve slam')
+                            raise KshConvertError(self.voxfile.name, file.name, line_num, 'new laser node spawn while trying to resolve slam')
                         elif now in self.events_track(side.to_track_num()):
                             laser = self.events_track(side.to_track_num())[now]
                         elif side in slam_status:
@@ -999,7 +1023,6 @@ ver=167''', file=file)
 
                     print(buffer.out(), file=file)
 
-
             print('--', file=file)
 
         for k, v in self.effect_defines.items():
@@ -1009,7 +1032,7 @@ ver=167''', file=file)
     def from_file(cls, path):
         parser = Vox()
 
-        file = open(path, 'r')
+        file = open(path, 'r', encoding='cp932')
         parser.voxfile = file
 
         filename_array = os.path.basename(path).split('_')
@@ -1020,19 +1043,14 @@ ver=167''', file=file)
                 parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
                 parser.difficulty_idx = os.path.splitext(path)[0][-2]
             except ValueError:
-                raise VoxNameError(f'unable to parse file name "{path}"')
+                raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
 
             tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
 
             if len(tree) == 0:
-                raise MetadataFindError(f'unable to find metadata for song {parser.song_id}')
+                raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
 
             parser.metadata = tree[0]
-
-        if len(ID_TO_AUDIO) > 0:
-            if not parser.song_id in ID_TO_AUDIO:
-                raise AudioFileFindError(f'unable to find audio file for song {parser.song_id}')
-        # else we chose to skip audio.
 
         return parser
 
@@ -1053,18 +1071,23 @@ ver=167''', file=file)
                 else:
                     self.state = token_state
                 section_line_no = 0
-            elif line.startswith('define'):
+            elif line.startswith('define\t'):
                 splitted = line.split('\t')
 
-                # Sanity check.
-                if splitted[0] != 'define':
-                    raise ParserError('illegal define line in SOUND ID', self.voxfile, line_no)
                 if len(splitted) != 3:
-                    raise ParserError('illegal number of operands in define statement', self.voxfile, line_no)
+                    raise VoxParseError(self.voxfile, str(self.state), line_no, f'define line "{line}" does not have 3 operands')
 
-                self.vox_defines[splitted[1]] = splitted[2]
+                self.vox_defines[splitted[1]] = int(splitted[2])
+                if int(splitted[2]) != 0:
+                    self.effect_defines[int(splitted[2])] = KshEffectDefine.from_pre_v4_vox_sound_id(int(splitted[2]))
             elif self.state is not None:
-                self.process_state(line, section_line_no)
+                try:
+                    self.process_state(line, line_no, section_line_no)
+                except VoxParseError as e:
+                    print(f'Warning: {str(e)}')
+                    self.warnings += 1
+                    write_to_exceptions(vox.voxfile.name, line_no=line_no, is_input_error=True)
+
             section_line_no += 1
             line_no += 1
         self.finalized = True
@@ -1190,19 +1213,29 @@ if args.convert:
             print(vox_path + ':')
             try:
                 vox = Vox.from_file(vox_path)
-            except (VoxNameError, MetadataFindError, AudioFileFindError):
-                print(f'Reading from vox failed with traceback:\n{traceback.format_exc()}')
+            except Exception as e:
+                print(f'Loading vox file failed with "{str(e)}"\nTraceback:\n{traceback.format_exc()}\n')
                 write_to_exceptions(vox_path, is_critical=True)
                 continue
 
-            print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
+            try:
+                print(f'> Processing "{vox_path}": "{str(vox)}"')
+            except (AttributeError, LookupError):
+                # Metadata not found.
+                print(f'Metadata issue encountered')
+                write_to_exceptions(vox_path, is_critical=True)
+                continue
 
             # First try to parse the file.
             try:
                 vox.parse()
+            except VoxParseError as e:
+                print(f'Parsing vox file failed on line {e.line} with "{str(e)}":\n{traceback.format_exc()}')
+                write_to_exceptions(vox.voxfile.name, line_no=e.line, is_input_error=True, is_critical=True)
+                continue
             except Exception as e:
-                print(f'Parsing vox file failed with traceback:\n{traceback.format_exc()}')
-                write_to_exceptions(vox_path, is_critical=True)
+                print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
+                write_to_exceptions(vox_path, is_input_error=True, is_critical=True)
                 continue
 
             song_dir = f'out/{vox.get_metadata("ascii")}'
@@ -1265,12 +1298,16 @@ if args.convert:
             print(f'> Writing KSH data to "{chart_path}".')
             with open(chart_path, "w+", encoding='utf-8') as ksh_file:
                 try:
-                    vox.as_ksh(file=ksh_file,
+                    vox.write_to_ksh(file=ksh_file,
                                jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
                                track_basename='track_inf.mp3' if using_difficulty_audio else None,
                                preview_basename=preview_basename)
+                except KshConvertError as e:
+                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
+                    write_to_exceptions(e.outfile, line_no=e.line, is_critical=True)
+                    continue
                 except Exception as e:
-                    print(f'Outputting to KSH failed with traceback:\n{traceback.format_exc()}')
+                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
                     write_to_exceptions(vox.voxfile.name, is_critical=True)
                     continue
                 print('> Success!')

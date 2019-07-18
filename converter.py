@@ -14,10 +14,10 @@ import argparse
 
 TICKS_PER_BEAT = 48
 
-pprint_prefix = ''
-
-def pprint(*args, **kwargs):
-    print('(' + pprint_prefix + ') '.join(map(str, args)), **kwargs)
+exceptions_file = None
+def write_to_exceptions(filename, is_critical=False):
+    if exceptions_file is not None:
+        print(f'{"*** " if is_critical else ""}{filename}:\n{traceback.format_exc()}', file=exceptions_file)
 
 class RevMap:
     def __init__(self, mapping):
@@ -102,6 +102,35 @@ class CameraParam(Enum):
 
     ROT_X = auto()
     RAD_I = auto()
+
+class KshootFilter(Enum):
+    @classmethod
+    def from_vox_id(cls, id):
+        if id == 0:
+            return cls.PEAK
+        elif id == 2:
+            return cls.LOWPASS
+        elif id == 4:
+            return cls.HIGHPASS
+        elif id == 5:
+            return cls.BITCRUSH
+
+        raise KshConversionError(f'unrecognized vox filter effect id {id}')
+
+    def to_ksh_name(self):
+        if self == self.PEAK:
+            return 'peak'
+        elif self == self.LOWPASS:
+            return 'lpf1'
+        elif self == self.HIGHPASS:
+            return 'hpf1'
+        elif self == self.PEAK:
+            return 'peak'
+
+    PEAK = auto()
+    LOWPASS = auto()
+    HIGHPASS = auto()
+    BITCRUSH = auto()
 
 class KshootEffect(Enum):
     @classmethod
@@ -400,12 +429,14 @@ class LaserNode:
         position: int = None
         node_type: LaserCont = None
         range: int = 1
+        filter: KshootFilter = KshootFilter.PEAK
 
     def __init__(self, builder: Builder):
         self.side = builder.side
         self.position = builder.position
         self.node_type = builder.node_type
         self.range = builder.range
+        self.filter = builder.filter
 
     def position_ksh(self):
         """ Convert the position from the 7-bit scale to whatever the hell KSM is using. """
@@ -749,7 +780,7 @@ class Vox:
                 if (section_line_no - 1) % 3 < 2:
                     # The < 2 condition will allow the second line to override the first.
                     if line.isspace():
-                        raise ParserError('fx effect info line is blank')
+                        raise ParserError('fx effect info line is blank', filename, line_no)
                     elif splitted[0] != '0,':
                         index = int(section_line_no / 3)
                         self.effect_defines[index] = KshEffectDefine.from_effect_info_line(index, line)
@@ -765,8 +796,14 @@ class Vox:
                 laser_node.side = LaserSide.LEFT if self.state_track == 1 else LaserSide.RIGHT
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
+                if len(splitted) > 4:
+                    try:
+                        laser_node.filter = KshootFilter.from_vox_id(int(splitted[4]))
+                    except KshConversionError:
+                        write_to_exceptions(f'{self.voxfile.name} {self.diff_token()}')
                 if len(splitted) > 5:
                     laser_node.range = int(splitted[5])
+
                 laser_node = LaserNode(laser_node)
 
                 if laser_node.position > 127 or laser_node.position < 0:
@@ -808,7 +845,7 @@ class Vox:
 
                     self.events[((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))] = ButtonPress(button, int(splitted[1]), fx_data)
                 except ValueError:
-                    print(f'> > Warning: ignoring invalid button track {self.state_track}')
+                    write_to_exceptions(f'{self.voxfile.name} {self.diff_token()}')
 
 
     def as_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
@@ -853,6 +890,7 @@ ver=167''', file=file)
         holds = {}
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slam_status = {}
+        last_filter = KshootFilter.PEAK
         current_timesig = self.events_timesig()[Timing(1, 1, 0)]
 
         measure_iter = range(self.end.measure)
@@ -948,6 +986,10 @@ ver=167''', file=file)
                         if laser.range != laser_range[side]:
                             buffer.meta.append(f'laserrange_{side.to_letter()}={laser.range}x')
                             laser_range[side] = laser.range
+
+                        if laser.filter != last_filter:
+                            buffer.meta.append(f'filtertype={laser.filter.to_ksh_name()}')
+                            last_filter = laser.filter
 
                         if laser.node_type == LaserCont.START:
                             lasers[side] = True
@@ -1103,6 +1145,7 @@ argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 AUDIO_EXTENSION = '.ogg'
+EXCEPTIONS_FILE = 'exceptions.txt'
 ID_TO_AUDIO = {}
 
 if not args.no_media:
@@ -1135,6 +1178,8 @@ if args.convert:
 
     VOX_ROOT = 'data'
 
+    exceptions_file = open(EXCEPTIONS_FILE, 'w')
+
     # Load source directory.
     for d in filter(lambda x: os.path.isdir(VOX_ROOT + '/' + x), os.listdir(VOX_ROOT)):
         vox_dir = VOX_ROOT + '/' + d
@@ -1145,8 +1190,9 @@ if args.convert:
             print(vox_path + ':')
             try:
                 vox = Vox.from_file(vox_path)
-            except (VoxNameError, MetadataFindError, AudioFileFindError) as e:
-                print(f'> Skipping file "{vox_path}": {e}')
+            except (VoxNameError, MetadataFindError, AudioFileFindError):
+                print(f'Reading from vox failed with traceback:\n{traceback.format_exc()}')
+                write_to_exceptions(vox_path, is_critical=True)
                 continue
 
             print(f'> Processing {vox.song_id} "{vox.get_metadata("ascii")}" {vox.difficulty}.')
@@ -1155,7 +1201,8 @@ if args.convert:
             try:
                 vox.parse()
             except Exception as e:
-                print(f'> Parsing vox file failed with\n{traceback.format_exc()}')
+                print(f'Parsing vox file failed with traceback:\n{traceback.format_exc()}')
+                write_to_exceptions(vox_path, is_critical=True)
                 continue
 
             song_dir = f'out/{vox.get_metadata("ascii")}'
@@ -1224,8 +1271,11 @@ if args.convert:
                                preview_basename=preview_basename)
                 except Exception as e:
                     print(f'Outputting to KSH failed with traceback:\n{traceback.format_exc()}')
+                    write_to_exceptions(vox.voxfile.name, is_critical=True)
                     continue
                 print('> Success!')
+
+    exceptions_file.close()
     exit(0)
 
 print('Please specify something to do.')

@@ -158,8 +158,7 @@ class KshootFilter(Enum):
         elif self == self.HIGHPASS:
             return 'hpf1'
         elif self == self.BITCRUSH:
-            # TODO is this right?
-            return 'bitcrush'
+            return 'bitc'
 
     PEAK = auto()
     LOWPASS = auto()

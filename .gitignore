@@ -3,3 +3,4 @@ data/
 .idea/
 *.ksh
 out/
+exceptions.txt

@@ -35,6 +35,7 @@ class RevMap:
     def rev(self, k):
         return self._rev.get(k)
 
+
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
 class VoxLoadError(Exception):
@@ -459,6 +460,7 @@ class LaserNode:
         node_type: LaserCont = None
         range: int = 1
         filter: KshootFilter = KshootFilter.PEAK
+        spin_division: int = 0
 
     def __init__(self, builder: Builder):
         self.side = builder.side
@@ -466,6 +468,7 @@ class LaserNode:
         self.node_type = builder.node_type
         self.range = builder.range
         self.filter = builder.filter
+        self.spin_division = builder.spin_division
 
         if self.position < 0 or self.position > 127:
             raise ValueError(f'position {self.position} is out of bounds')
@@ -483,9 +486,22 @@ class LaserNode:
         return chars[idx]
 
 class LaserSlam:
+    class Direction(Enum):
+        LEFT = auto()
+        RIGHT = auto()
+
     def __init__(self, start: LaserNode, end: LaserNode):
         self.start = start
         self.end = end
+
+        if self.start.position == self.end.position:
+            raise ValueError('attempt to create a slam with the same start and end')
+
+    def direction(self):
+        if self.start.position > self.end.position:
+            return self.Direction.LEFT
+        else:
+            return self.Direction.RIGHT
 
 class Difficulty(Enum):
     NOVICE = 0
@@ -589,6 +605,7 @@ class KshLineBuf:
     def __init__(self):
         self.buttons = {}
         self.lasers = {}
+        self.spin = ''
         self.meta = []
 
         for bt in list(Button):
@@ -625,6 +642,8 @@ class KshLineBuf:
 
         for laser in [ LaserSide.LEFT, LaserSide.RIGHT ]:
             buf += self.lasers[laser]
+
+        buf += self.spin
 
         return buf
 
@@ -843,6 +862,7 @@ class Vox:
                 laser_node.side = LaserSide.LEFT if self.state_track == 1 else LaserSide.RIGHT
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
+                laser_node.spin_division = int(splitted[3])
                 if len(splitted) > 4:
                     try:
                         laser_node.filter = KshootFilter.from_vox_filter_id(int(splitted[4]))
@@ -1027,6 +1047,17 @@ ver=167''', file=file)
 
                         if type(laser) is LaserSlam:
                             slam_status[side] = [laser, 3]
+                            if laser.start.spin_division != 0:
+                                if buffer.spin != '':
+                                    exceptions_write('ksh/laser', 'spin on both lasers')
+
+                                buffer.spin = '@'
+                                if laser.direction() == LaserSlam.Direction.LEFT:
+                                    buffer.spin += '('
+                                else:
+                                    buffer.spin += ')'
+
+                                buffer.spin += str(int(192 / laser.start.spin_division))
                             laser = laser.start
 
                         if laser.range != laser_range[side]:

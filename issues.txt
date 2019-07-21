@@ -3,5 +3,7 @@ Kyun kyun 15 -- crashes
 Midnight city warfare 13 -- lasers choppy
 Crepe suzette 5-? -- metadata is still messed up
 Crystal missle 14 -- holds at beginning broken, incorrect sounds on end lasers1
-
+She is my wife super star 10 -- wtf??
     ** denotes unable to reprodouce
+
+Old offset: 41 -25

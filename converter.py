@@ -4,7 +4,6 @@ from recordclass import dataobject
 from xml.etree import ElementTree
 from shutil import copyfile
 from functools import lru_cache as cache
-from os.path import splitext as splitx
 import traceback
 import random
 import math
@@ -12,12 +11,18 @@ import math
 import sys, os
 import argparse
 
+from os.path import splitext as splitx
+from os.path import join as pjoin
+
 TICKS_PER_BEAT = 48
 
 exceptions_file = None
-def write_to_exceptions(filename, line_no=None, is_input_error=False, is_critical=False):
+def exceptions_write_last_error(filename, line_no=None, is_input_error=False, is_critical=False):
     if exceptions_file is not None:
         print(f'{"[IN]" if is_input_error else "[OUT]"} {"*** " if is_critical else ""}{filename}{":" + str(line_no) if line_no is not None else ""}:\n{traceback.format_exc()}', file=exceptions_file)
+def exceptions_write(tag, message):
+    if exceptions_file is not None:
+        print(f'<{tag}> {message}', file=exceptions_file)
 
 class RevMap:
     def __init__(self, mapping):
@@ -173,6 +178,7 @@ class KshootEffect(Enum):
             cls.RETRIGGER: 'Retrigger',
             cls.GATE: 'Gate',
             cls.FLANGER: 'Flanger',
+            cls.PHASER: 'Phaser',
             cls.TAPESTOP: 'TapeStop',
             cls.SIDECHAIN: 'SideChain',
             cls.WOBBLE: 'Wobble',
@@ -220,6 +226,7 @@ class KshEffectDefine:
 
     @classmethod
     def from_pre_v4_vox_sound_id(cls, sound_id):
+        """Generate an effect definition line from the old-style effect declaration."""
         define = cls.default_effect()
 
         if sound_id == 2:
@@ -261,6 +268,7 @@ class KshEffectDefine:
         define.effect = KshootEffect.FLANGER
 
         if splitted[0] == '1' or splitted[0] == '8':
+            # TODO No way this is right
             # Retrigger / echo (they're pretty much the same thing)
             define.effect = KshootEffect.RETRIGGER
 
@@ -271,7 +279,7 @@ class KshEffectDefine:
             else:
                 define.main_param = int((4 / float(splitted[3])) * float(splitted[1]))
                 define.params['waveLength'] = f'1/{define.main_param}'
-                define.params['updatePeriod'] = f"1/{4 / float(splitted[3])}"
+                define.params['updatePeriod'] = f"1/{4 / int(float(splitted[3]))}"
             rate = f'{int(float(splitted[5]) * 100)}%'
             feedback_level = f'{int(float(splitted[4]) * 100)}%'
 
@@ -292,22 +300,28 @@ class KshEffectDefine:
                     define.params['updatePeriod'] = 0
 
         elif splitted[0] == '2':
+            # This is probably correct
             # Gate
             define.effect = KshootEffect.GATE
-            define.main_param = (2 / float(splitted[3])) * float(splitted[2])
+            define.main_param = int((2 / float(splitted[3])) * float(splitted[2]))
             define.params['waveLength'] = f'1/{define.main_param}'
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
 
         elif splitted[0] == '3':
-            # Flanger
-            define.effect = KshootEffect.FLANGER
-            define.params['delay'] = f'{int(float(splitted[2]) * 100)}samples'
-            define.params['depth'] = f'{int(float(splitted[3]) * 100)}samples'
-            define.params['feedback'] = f'{int(splitted[4])}%' # TODO Not sure about this one
-            define.params['period'] = str(float(splitted[5]))
-            define.params['volume'] = f'{min(int(float(splitted[1]) * 1.33), 100)}%' # Normally no multiplier but i like this
+            # TODO Figure this out
+            # Phaser (more like chorus)
+            define.effect = KshootEffect.PHASER
+            if int(splitted[4]) > 100:
+                exceptions_write('FX from info', 'value too high for phaser percent')
+            else:
+                define.params['stereoWidth'] = f'{int(float(splitted[4]))}%'
+
+            define.params['Q'] = str(float(splitted[3]))
+            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
+            define.params['period'] = '1'
 
         elif splitted[0] == '4':
+            # TODO This needs some tweaking
             # Tape stop
             define.effect = KshootEffect.TAPESTOP
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
@@ -320,6 +334,7 @@ class KshEffectDefine:
             define.params['speed'] = f'{define.main_param}%'
 
         elif splitted[0] == '5':
+            # TODO Investigate if this is right
             # Sidechain
             define.effect = KshootEffect.SIDECHAIN
             define.main_param = int(float(splitted[2]) * 2)
@@ -332,7 +347,7 @@ class KshEffectDefine:
             define.params['waveLength'] = f'1/{define.main_param}'
             define.params['loFreq'] = f'{int(float(splitted[4]))}Hz'
             define.params['hiFreq'] = f'{int(float(splitted[5]))}Hz'
-            define.params['Q'] = str(float(splitted[7]))
+            define.params['Q'] = float(splitted[7])
             define.params['mix'] = f'0%>{int(float(splitted[3]))}%'
 
         elif splitted[0] == '7':
@@ -346,7 +361,7 @@ class KshEffectDefine:
             # Pitchshift
             define.effect = KshootEffect.PITCHSHIFT
             define.main_param = int(float(splitted[2]))
-            define.params['pitch'] = str(define.main_param)
+            define.params['pitch'] = define.main_param
             define.params['mix'] = f'0%>{int(float(splitted[1]))}'
 
         elif splitted[0] == '11':
@@ -355,6 +370,14 @@ class KshEffectDefine:
             define.params['loFreq'] = f'{int(float(splitted[3]))}Hz'
             define.params['hiFreq'] = define.params["loFreq"]
             define.params['Q'] = '1.4'
+
+        elif splitted[0] == '12':
+            # High pass effect
+            # TODO This is not right at all and is a placeholder
+            define.effect = KshootEffect.FLANGER
+            define.params['depth'] = '200samples'
+            define.params['volume'] = '100%'
+            define.params['mix'] = f'0%>100%'
 
         else:
             raise ValueError(f'effect define id {splitted[0]} is not supported')
@@ -528,26 +551,26 @@ class Difficulty(Enum):
 class TiltMode(Enum):
     # TODO Tweak -- is biggest correct?
     NORMAL = auto()
-    BIGGEST = auto()
-    KEEP_BIGGEST = auto()
+    BIGGER = auto()
+    KEEP_BIGGER = auto()
 
     @classmethod
     def from_vox_id(cls, id):
         if id == 0:
             return cls.NORMAL
         elif id == 1:
-            return cls.BIGGEST
+            return cls.BIGGER
         elif id == 2:
-            return cls.KEEP_BIGGEST
+            return cls.KEEP_BIGGER
         return None
 
     def to_ksh_name(self):
         if self == self.NORMAL:
             return 'normal'
-        elif self == self.BIGGEST:
-            return 'biggest'
-        elif self == self.KEEP_BIGGEST:
-            return 'keep_biggest'
+        elif self == self.BIGGER:
+            return 'bigger'
+        elif self == self.KEEP_BIGGER:
+            return 'keep_bigger'
         return None
 
 class EventKind(Enum):
@@ -824,7 +847,7 @@ class Vox:
                     try:
                         laser_node.filter = KshootFilter.from_vox_filter_id(int(splitted[4]))
                     except ValueError:
-                        write_to_exceptions(self.voxfile.name, line_no=line_no)
+                        exceptions_write_last_error(self.voxfile.name, line_no=line_no)
 
                 if len(splitted) > 5:
                     laser_node.range = int(splitted[5])
@@ -1085,10 +1108,11 @@ ver=167''', file=file)
                 except VoxParseError as e:
                     print(f'Warning: {str(e)}')
                     self.warnings += 1
-                    write_to_exceptions(vox.voxfile.name, line_no=line_no, is_input_error=True)
+                    exceptions_write_last_error(vox.voxfile.name, line_no=line_no, is_input_error=True)
 
             section_line_no += 1
             line_no += 1
+            DEBUG_curr_line_num = line_no
         self.finalized = True
 
 METADATA_FIX = [
@@ -1130,9 +1154,13 @@ CASES = {
     'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox',
     'bug-fx': 'data/vox_13_ifs/004_1208_coldapse_aoi_3e.vox',
     'double-fx': 'data/vox_12_ifs/004_1136_freedomdive_xi_2a.vox',
+    'fx': 'data/vox_11_ifs/004_1014_crystalmissile_fuhringcatmark_5m.vox',
     'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
     'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox'
 }
+
+DEBUG_curr_song = None
+DEBUG_curr_line_num = 0
 
 def copy_preview(vox, song_dir):
     output_path = f'{song_dir}/preview{AUDIO_EXTENSION}'
@@ -1157,6 +1185,7 @@ def copy_preview(vox, song_dir):
 
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
+argparser.add_argument('-i', '--song-id')
 argparser.add_argument('-m', '--metadata-only', action='store_true')
 argparser.add_argument('-p', '--preview-only', action='store_true')
 argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
@@ -1168,6 +1197,8 @@ args = argparser.parse_args()
 
 AUDIO_EXTENSION = '.ogg'
 EXCEPTIONS_FILE = 'exceptions.txt'
+VOX_ROOT = 'data'
+
 ID_TO_AUDIO = {}
 
 if not args.no_media:
@@ -1198,118 +1229,125 @@ if args.convert:
         print(f'Creating output directory.')
         os.mkdir('out')
 
-    VOX_ROOT = 'data'
-
     exceptions_file = open(EXCEPTIONS_FILE, 'w')
 
+    candidates = []
+
+    for dirpath, dirnames, filenames in os.walk(VOX_ROOT):
+        for filename in filenames:
+            if (args.song_id is None and args.testcase is None) or \
+                    (args.song_id is not None and f'_{args.song_id}_' in filename) or \
+                    (args.testcase is not None and pjoin(dirpath, filename).replace('\\', '/') == CASES[args.testcase]):
+                candidates.append(pjoin(dirpath, filename))
+
+    print('The following files will be processed:')
+    for f in candidates:
+        print(f'\t{f}')
+
     # Load source directory.
-    for d in filter(lambda x: os.path.isdir(VOX_ROOT + '/' + x), os.listdir(VOX_ROOT)):
-        vox_dir = VOX_ROOT + '/' + d
-        for f in os.listdir(vox_dir):
-            vox_path = f'{vox_dir}/{f}'
-            if args.testcase and vox_path != CASES[args.testcase]:
-                continue
-            print(vox_path + ':')
+    for vox_path in candidates:
+        print(vox_path + ':')
+        try:
+            vox = Vox.from_file(vox_path)
+        except Exception as e:
+            print(f'Loading vox file failed with "{str(e)}"\n{traceback.format_exc()}\n')
+            exceptions_write_last_error(vox_path, is_critical=True)
+            continue
+
+        DEBUG_curr_song = vox.voxfile.name
+
+        try:
+            print(f'> Processing "{vox_path}": "{str(vox)}"')
+        except (AttributeError, LookupError):
+            # Metadata not found.
+            print(f'Metadata issue encountered')
+            exceptions_write_last_error(vox_path, is_critical=True)
+            continue
+
+        # First try to parse the file.
+        try:
+            vox.parse()
+        except VoxParseError as e:
+            print(f'Parsing vox file failed on line {e.line} with "{str(e)}":\n{traceback.format_exc()}')
+            exceptions_write_last_error(vox.voxfile.name, line_no=e.line, is_input_error=True, is_critical=True)
+            continue
+        except Exception as e:
+            print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
+            exceptions_write_last_error(vox_path, is_input_error=True, is_critical=True)
+            continue
+
+        song_dir = f'out/{vox.get_metadata("ascii")}'
+        if not os.path.isdir(song_dir):
+            print(f'> Creating song directory "{song_dir}".')
+            os.mkdir(song_dir)
+
+        preview_basename = copy_preview(vox, song_dir)
+        if args.preview_only:
+            continue
+
+        fallback_jacket_diff_idx = None
+
+        using_difficulty_audio = False
+
+        if not args.no_media:
+            target_audio_path = song_dir + '/track.ogg'
+
+            src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
+
+            if vox.difficulty == Difficulty.INFINITE:
+                src_audio_path_diff = f'{splitx(src_audio_path)[0]} [INF]{splitx(src_audio_path)[1]}'
+                if os.path.exists(src_audio_path_diff):
+                    print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
+                    src_audio_path = src_audio_path_diff
+                    target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
+                    using_difficulty_audio = True
+
+            if not os.path.exists(target_audio_path):
+                print(f'> Copying audio file {src_audio_path} to song directory.')
+                copyfile(src_audio_path, target_audio_path)
+            else:
+                print(f'> Audio file "{target_audio_path}" already exists.')
+
+            src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+            src_jacket_path = args.jacket_dir + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+
+            if os.path.exists(src_jacket_path):
+                target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+                print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+                copyfile(src_jacket_path, target_jacket_path)
+            else:
+                print(f'> Could not find jacket image file. Checking easier diffs.')
+                fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+                while True:
+                    if fallback_jacket_diff_idx < 0:
+                        print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                        fallback_jacket_diff_idx = ''
+                        break
+
+                    easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
+                    if os.path.exists(easier_jacket_path):
+                        # We found the diff number with the jacket.
+                        print(f'> Using jacket "{easier_jacket_path}".')
+                        break
+                    fallback_jacket_diff_idx -= 1
+
+        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+        print(f'> Writing KSH data to "{chart_path}".')
+        with open(chart_path, "w+", encoding='utf-8') as ksh_file:
             try:
-                vox = Vox.from_file(vox_path)
+                vox.write_to_ksh(file=ksh_file,
+                           jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
+                           track_basename='track_inf.mp3' if using_difficulty_audio else None,
+                           preview_basename=preview_basename)
+            except KshConvertError as e:
+                print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
+                exceptions_write_last_error(e.outfile, line_no=e.line, is_critical=True)
+                continue
             except Exception as e:
-                print(f'Loading vox file failed with "{str(e)}"\nTraceback:\n{traceback.format_exc()}\n')
-                write_to_exceptions(vox_path, is_critical=True)
+                print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
+                exceptions_write_last_error(vox.voxfile.name, is_critical=True)
                 continue
-
-            try:
-                print(f'> Processing "{vox_path}": "{str(vox)}"')
-            except (AttributeError, LookupError):
-                # Metadata not found.
-                print(f'Metadata issue encountered')
-                write_to_exceptions(vox_path, is_critical=True)
-                continue
-
-            # First try to parse the file.
-            try:
-                vox.parse()
-            except VoxParseError as e:
-                print(f'Parsing vox file failed on line {e.line} with "{str(e)}":\n{traceback.format_exc()}')
-                write_to_exceptions(vox.voxfile.name, line_no=e.line, is_input_error=True, is_critical=True)
-                continue
-            except Exception as e:
-                print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
-                write_to_exceptions(vox_path, is_input_error=True, is_critical=True)
-                continue
-
-            song_dir = f'out/{vox.get_metadata("ascii")}'
-            if not os.path.isdir(song_dir):
-                print(f'> Creating song directory "{song_dir}".')
-                os.mkdir(song_dir)
-
-            preview_basename = copy_preview(vox, song_dir)
-            if args.preview_only:
-                continue
-
-            fallback_jacket_diff_idx = None
-
-            using_difficulty_audio = False
-
-            if not args.no_media:
-
-                target_audio_path = song_dir + '/track.ogg'
-
-                src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
-
-                if vox.difficulty == Difficulty.INFINITE:
-                    src_audio_path_diff = f'{splitx(src_audio_path)[0]} [INF]{splitx(src_audio_path)[1]}'
-                    if os.path.exists(src_audio_path_diff):
-                        print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
-                        src_audio_path = src_audio_path_diff
-                        target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
-                        using_difficulty_audio = True
-
-                if not os.path.exists(target_audio_path):
-                    print(f'> Copying audio file {src_audio_path} to song directory.')
-                    copyfile(src_audio_path, target_audio_path)
-                else:
-                    print(f'> Audio file "{target_audio_path}" already exists.')
-
-                src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-                src_jacket_path = args.jacket_dir + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
-
-                if os.path.exists(src_jacket_path):
-                    target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
-                    print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
-                    copyfile(src_jacket_path, target_jacket_path)
-                else:
-                    print(f'> Could not find jacket image file. Checking easier diffs.')
-                    fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
-                    while True:
-                        if fallback_jacket_diff_idx < 0:
-                            print('> No jackets found for easier difficulties either. Leaving jacket blank.')
-                            fallback_jacket_diff_idx = ''
-                            break
-
-                        easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
-                        if os.path.exists(easier_jacket_path):
-                            # We found the diff number with the jacket.
-                            print(f'> Using jacket "{easier_jacket_path}".')
-                            break
-                        fallback_jacket_diff_idx -= 1
-
-            chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
-            print(f'> Writing KSH data to "{chart_path}".')
-            with open(chart_path, "w+", encoding='utf-8') as ksh_file:
-                try:
-                    vox.write_to_ksh(file=ksh_file,
-                               jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
-                               track_basename='track_inf.mp3' if using_difficulty_audio else None,
-                               preview_basename=preview_basename)
-                except KshConvertError as e:
-                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                    write_to_exceptions(e.outfile, line_no=e.line, is_critical=True)
-                    continue
-                except Exception as e:
-                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                    write_to_exceptions(vox.voxfile.name, is_critical=True)
-                    continue
-                print('> Success!')
+            print('> Success!')
 
     exceptions_file.close()
     exit(0)

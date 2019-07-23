@@ -1381,7 +1381,7 @@ if args.convert:
             try:
                 vox.write_to_ksh(file=ksh_file,
                            jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
-                           track_basename='track_inf.mp3' if using_difficulty_audio else None,
+                           track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
                            preview_basename=preview_basename)
             except Exception as e:
                 print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')

@@ -62,6 +62,10 @@ class RevMap:
     def rev(self, k):
         return self._rev.get(k)
 
+def truncate(x, digits) -> float:
+    stepper = 10.0 ** digits
+    return math.trunc(stepper * x) / stepper
+
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
 class VoxLoadError(Exception):
@@ -121,6 +125,8 @@ class CameraParam(Enum):
             return cls.AIRL_SCAX
         elif vox_name == 'AIRR_ScaX':
             return cls.AIRR_SCAX
+        elif vox_name == 'Tilt':
+            return cls.TILT
 
         raise ValueError(f'invalid camera param "{vox_name}"')
 
@@ -129,14 +135,19 @@ class CameraParam(Enum):
             return 'zoom_top'
         elif self == self.RAD_I:
             return 'zoom_bottom'
+        elif self == self.TILT:
+            return 'tilt'
         else:
             return None
 
-    def scaling_factor(self):
+    def to_ksh_value(self, val):
+        # Convert the vox value to the one that will be printed to the ksh.
         if self == self.ROT_X:
-            return 150.0
+            return int(val * 150.0)
         elif self == self.RAD_I:
-            return -150.0
+            return int(val * -150.0)
+        elif self == self.TILT:
+            return truncate(val * -1.0, 1)
         return None
 
     ROT_X = auto()
@@ -144,6 +155,7 @@ class CameraParam(Enum):
     REALIZE = auto()
     AIRL_SCAX = auto()
     AIRR_SCAX = auto()
+    TILT = auto()
 
 def spcontroller_line_is_normal(param, splitted):
     cell = lambda i: splitted[i].strip()
@@ -1007,9 +1019,9 @@ ver=167''', file=file)
 
                     # Camera events.
                     for cam_param in list(CameraParam):
-                        if cam_param.scaling_factor() is not None and now in self.events_spcontroller(cam_param):
+                        if now in self.events_spcontroller(cam_param) and cam_param.to_ksh_value is not None:
                             the_change = self.events_spcontroller(cam_param)[now]
-                            buffer.meta.append(f'{cam_param.to_ksh_name()}={int(the_change * cam_param.scaling_factor())}')
+                            buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(the_change)}')
 
                     if now in self.events_tiltmode():
                         buffer.meta.append(f'tilt={self.events_tiltmode()[now].to_ksh_name()}')
@@ -1199,7 +1211,8 @@ CASES = {
     'double-fx': 'data/vox_12_ifs/004_1136_freedomdive_xi_2a.vox',
     'fx': 'data/vox_11_ifs/004_1014_crystalmissile_fuhringcatmark_5m.vox',
     'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
-    'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox'
+    'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox',
+    'manual-tilt': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_4i.vox'
 }
 
 debug = Debug()

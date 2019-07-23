@@ -16,13 +16,40 @@ from os.path import join as pjoin
 
 TICKS_PER_BEAT = 48
 
-exceptions_file = None
-def exceptions_write_last_error(filename, line_no=None, is_input_error=False, is_critical=False):
-    if exceptions_file is not None:
-        print(f'{"[IN]" if is_input_error else "[OUT]"} {"*** " if is_critical else ""}{filename}{":" + str(line_no) if line_no is not None else ""}:\n{traceback.format_exc()}', file=exceptions_file)
-def exceptions_write(tag, message):
-    if exceptions_file is not None:
-        print(f'<{tag}> {message}', file=exceptions_file)
+class Debug:
+    class State(Enum):
+        INPUT = auto()
+        OUTPUT = auto()
+
+    class Level(Enum):
+        ABNORMALITY = 'abnormal'
+        WARNING = 'warning'
+        ERROR = 'error'
+
+    def __init__(self):
+        self.state = None
+        self.input_filename = None
+        self.output_filename = None
+        self.current_line_num = None
+        self.exceptions_count = {}
+        self._exceptions_file = open("exceptions.txt", "w+")
+
+    def reset(self):
+        for level in list(self.Level):
+            self.exceptions_count[level] = 0
+
+    def close(self):
+        self._exceptions_file.close()
+
+    def current_filename(self):
+        return self.input_filename if self.state == self.State.INPUT else self.output_filename
+
+    def record(self, level, tag, message):
+        self.exceptions_count[level] += 1
+        print(f'{self.current_filename()}:{self.current_line_num}\n{level.value} / {tag}: {message}\n', file=self._exceptions_file)
+
+    def record_last_exception(self, level=Level.WARNING, tag='python_exception', trace=False):
+        self.record(level, tag, traceback.format_exc() if trace else sys.exc_info()[1])
 
 class RevMap:
     def __init__(self, mapping):
@@ -35,36 +62,21 @@ class RevMap:
     def rev(self, k):
         return self._rev.get(k)
 
-
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
 class VoxLoadError(Exception):
-    def __init__(self, file, msg):
-        self.file = file
-        self.msg = msg
-
-    def __str__(self):
-        return f'{self.file}: {self.msg}'
+    pass
 
 class VoxParseError(Exception):
-    def __init__(self, file, section, line, msg):
-        self.file = file
+    def __init__(self, section, msg):
         self.section = section
-        self.line = line
         self.msg = msg
 
     def __str__(self):
-        return f'{self.file}:{self.line} ({self.section}): {self.msg}'
+        return f'({self.section}) {self.msg}'
 
 class KshConvertError(Exception):
-    def __init__(self, infile, outfile, line, msg):
-        self.infile = infile
-        self.outfile = outfile
-        self.line = line
-        self.msg = msg
-
-    def __str__(self):
-        return f'{self.infile}  ->  {self.outfile}:{self.line}: {self.msg}'
+    pass
 
 class Timing:
     def __init__(self, measure, beat, offset):
@@ -312,10 +324,7 @@ class KshEffectDefine:
             # TODO Figure this out
             # Phaser (more like chorus)
             define.effect = KshootEffect.PHASER
-            if int(splitted[4]) > 100:
-                exceptions_write('FX from info', 'value too high for phaser percent')
-            else:
-                define.params['stereoWidth'] = f'{int(float(splitted[4]))}%'
+            define.params['stereoWidth'] = f'{int(float(splitted[4]))}%'
 
             define.params['Q'] = str(float(splitted[3]))
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
@@ -793,10 +802,8 @@ class Vox:
             return res
         return self._events_spcontroller[control]
 
-    def process_state(self, line, line_no, section_line_no):
+    def process_state(self, line, section_line_num):
         splitted = line.split('\t')
-
-        filename = self.voxfile.name
 
         if line == '':
             return
@@ -817,44 +824,46 @@ class Vox:
         elif self.state == self.State.TILT_INFO:
             try:
                 self.events[(EventKind.TILTMODE, Timing.from_time_str(splitted[0]))] = TiltMode.from_vox_id(int(splitted[1]))
-            except ValueError as e:
-                raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
+            except ValueError:
+                debug.record_last_exception(level=Debug.Level.WARNING)
 
         elif self.state == self.State.END_POSITION:
             self.end = Timing.from_time_str(line)
 
         elif self.state == self.State.SOUND_ID:
-            raise VoxParseError(filename, str(self.state), line_no, 'non-define line encountered in SOUND ID')
+            debug.record(Debug.Level.WARNING, 'vox_parse', f'({self.state}) line other than a #define was encountered in SOUND ID')
 
         elif self.state == self.State.FXBUTTON_EFFECT:
             if self.vox_version < 6:
                 try:
-                    self.effect_defines[section_line_no - 1] = KshEffectDefine.from_effect_info_line(line)
-                except ValueError as e:
-                    self.effect_defines[section_line_no - 1] = KshEffectDefine.default_effect()
-                    raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
+                    self.effect_defines[section_line_num - 1] = KshEffectDefine.from_effect_info_line(line)
+                except ValueError:
+                    self.effect_defines[section_line_num - 1] = KshEffectDefine.default_effect()
+                    debug.record_last_exception(tag='fx_load')
             else:
-                if (section_line_no - 1) % 3 < 2:
+                if (section_line_num - 1) % 3 < 2:
                     # The < 2 condition will allow the second line to override the first.
                     if line.isspace():
-                        raise VoxParseError(filename, str(self.state), line_no, 'fx effect info line is blank')
+                        debug.record(Debug.Level.WARNING, 'fx_load', 'fx effect info line is blank')
                     elif splitted[0] != '0,':
-                        index = int(section_line_no / 3)
+                        index = int(section_line_num / 3)
                         try:
                             self.effect_defines[index] = KshEffectDefine.from_effect_info_line(line)
-                        except ValueError as e:
+                        except ValueError:
                             self.effect_defines[index] = KshEffectDefine.default_effect()
-                            raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
+                            debug.record_last_exception(level=Debug.Level.WARNING, tag='fx_load')
 
         elif self.state == self.State.SPCONTROLLER:
             try:
                 param = CameraParam.from_vox_name(splitted[1])
-            except ValueError as e:
-                raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
+            except ValueError:
+                debug.record_last_exception(tag='spcontroller_load')
+                return
+
             if param is not None:
                 self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = float(splitted[4])
             if not spcontroller_line_is_normal(param, splitted):
-                raise VoxParseError(filename, str(self.state), line_no, f'line is abnormal: {line}')
+                debug.record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
 
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:
@@ -863,11 +872,12 @@ class Vox:
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
                 laser_node.spin_division = int(splitted[3])
+
                 if len(splitted) > 4:
                     try:
                         laser_node.filter = KshootFilter.from_vox_filter_id(int(splitted[4]))
                     except ValueError:
-                        exceptions_write_last_error(self.voxfile.name, line_no=line_no)
+                        debug.record_last_exception(tag='laser_load')
 
                 if len(splitted) > 5:
                     laser_node.range = int(splitted[5])
@@ -895,8 +905,9 @@ class Vox:
             else:
                 try:
                     button = Button.from_track_num(self.state_track)
-                except ValueError as e:
-                    raise VoxParseError(filename, str(self.state), line_no, str(e)) from e
+                except ValueError:
+                    debug.record_last_exception(tag='button_load')
+                    return
 
                 if button is None:
                     # Ignore track 9 buttons.
@@ -989,7 +1000,7 @@ ver=167''', file=file)
                     buffer = KshLineBuf()
 
                     if now.beat > 1 and now.offset > 0 and now in self.events_timesig():
-                        raise KshConvertError(self.voxfile.name, file.name, line_num, 'time signature change in the middle of a measure')
+                        raise KshConvertError('time signature change in the middle of a measure')
 
                     if now in self.events_bpm():
                         buffer.meta.append(f't={str(self.events_bpm()[now]).rstrip("0").rstrip(".").strip()}')
@@ -1049,7 +1060,7 @@ ver=167''', file=file)
                             slam_status[side] = [laser, 3]
                             if laser.start.spin_division != 0:
                                 if buffer.spin != '':
-                                    exceptions_write('ksh/laser', 'spin on both lasers')
+                                    debug.record(Debug.Level.WARNING, 'ksh_laser', 'spin on both lasers')
 
                                 buffer.spin = '@'
                                 if laser.direction() == LaserSlam.Direction.LEFT:
@@ -1108,12 +1119,19 @@ ver=167''', file=file)
         return parser
 
     def parse(self):
-        line_no = 1
+        line_no = 0
         section_line_no = 0
+
         for line in self.voxfile:
+            section_line_no += 1
+            line_no += 1
+            debug.current_line_num = line_no
+
             line = line.strip()
+
             if line.startswith('//'):
                 continue
+
             if line.startswith('#'):
                 token_state = self.State.from_token(line.split('#')[1])
                 if token_state is None:
@@ -1124,26 +1142,20 @@ ver=167''', file=file)
                 else:
                     self.state = token_state
                 section_line_no = 0
+
             elif line.startswith('define\t'):
                 splitted = line.split('\t')
-
                 if len(splitted) != 3:
-                    raise VoxParseError(self.voxfile, str(self.state), line_no, f'define line "{line}" does not have 3 operands')
+                    debug.record(f'define line "{line}" does not have 3 operands')
+                    continue
 
                 self.vox_defines[splitted[1]] = int(splitted[2])
                 if int(splitted[2]) != 0:
                     self.effect_defines[int(splitted[2])] = KshEffectDefine.from_pre_v4_vox_sound_id(int(splitted[2]))
-            elif self.state is not None:
-                try:
-                    self.process_state(line, line_no, section_line_no)
-                except VoxParseError as e:
-                    print(f'Warning: {str(e)}')
-                    self.warnings += 1
-                    exceptions_write_last_error(vox.voxfile.name, line_no=line_no, is_input_error=True)
 
-            section_line_no += 1
-            line_no += 1
-            DEBUG_curr_line_num = line_no
+            elif self.state is not None:
+                self.process_state(line, section_line_no)
+
         self.finalized = True
 
 METADATA_FIX = [
@@ -1190,8 +1202,7 @@ CASES = {
     'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox'
 }
 
-DEBUG_curr_song = None
-DEBUG_curr_line_num = 0
+debug = Debug()
 
 def copy_preview(vox, song_dir):
     output_path = f'{song_dir}/preview{AUDIO_EXTENSION}'
@@ -1214,6 +1225,10 @@ def copy_preview(vox, song_dir):
 
     return os.path.basename(output_path)
 
+##############
+# PROGRAM RUNTIME BEGINS BELOW
+#############
+
 argparser = argparse.ArgumentParser(description='Convert vox to ksh')
 argparser.add_argument('-t', '--testcase')
 argparser.add_argument('-i', '--song-id')
@@ -1227,7 +1242,6 @@ argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 AUDIO_EXTENSION = '.ogg'
-EXCEPTIONS_FILE = 'exceptions.txt'
 VOX_ROOT = 'data'
 
 ID_TO_AUDIO = {}
@@ -1260,8 +1274,6 @@ if args.convert:
         print(f'Creating output directory.')
         os.mkdir('out')
 
-    exceptions_file = open(EXCEPTIONS_FILE, 'w')
-
     candidates = []
 
     for dirpath, dirnames, filenames in os.walk(VOX_ROOT):
@@ -1277,34 +1289,31 @@ if args.convert:
 
     # Load source directory.
     for vox_path in candidates:
-        print(vox_path + ':')
+        debug.state = Debug.State.INPUT
+        debug.input_filename = vox_path
+        debug.output_filename = None
+        debug.reset()
+
+        print(f'{vox_path}:')
         try:
             vox = Vox.from_file(vox_path)
-        except Exception as e:
-            print(f'Loading vox file failed with "{str(e)}"\n{traceback.format_exc()}\n')
-            exceptions_write_last_error(vox_path, is_critical=True)
+        except Exception:
+            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
             continue
-
-        DEBUG_curr_song = vox.voxfile.name
 
         try:
             print(f'> Processing "{vox_path}": "{str(vox)}"')
         except (AttributeError, LookupError):
-            # Metadata not found.
-            print(f'Metadata issue encountered')
-            exceptions_write_last_error(vox_path, is_critical=True)
+            print('An error occurred with loading the metadata.')
+            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
             continue
 
         # First try to parse the file.
         try:
             vox.parse()
-        except VoxParseError as e:
-            print(f'Parsing vox file failed on line {e.line} with "{str(e)}":\n{traceback.format_exc()}')
-            exceptions_write_last_error(vox.voxfile.name, line_no=e.line, is_input_error=True, is_critical=True)
-            continue
         except Exception as e:
             print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
-            exceptions_write_last_error(vox_path, is_input_error=True, is_critical=True)
+            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
             continue
 
         song_dir = f'out/{vox.get_metadata("ascii")}'
@@ -1363,6 +1372,10 @@ if args.convert:
                     fallback_jacket_diff_idx -= 1
 
         chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+
+        debug.output_filename = chart_path
+        debug.state = Debug.State.OUTPUT
+
         print(f'> Writing KSH data to "{chart_path}".')
         with open(chart_path, "w+", encoding='utf-8') as ksh_file:
             try:
@@ -1370,17 +1383,13 @@ if args.convert:
                            jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
                            track_basename='track_inf.mp3' if using_difficulty_audio else None,
                            preview_basename=preview_basename)
-            except KshConvertError as e:
-                print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                exceptions_write_last_error(e.outfile, line_no=e.line, is_critical=True)
-                continue
             except Exception as e:
                 print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                exceptions_write_last_error(vox.voxfile.name, is_critical=True)
+                debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
                 continue
-            print('> Success!')
+            print(f'> Finished conversion with {debug.exceptions_count[Debug.Level.ABNORMALITY]} abnormalities, {debug.exceptions_count[Debug.Level.WARNING]} warnings, and {debug.exceptions_count[Debug.Level.ERROR]} errors.')
 
-    exceptions_file.close()
+    debug.close()
     exit(0)
 
 print('Please specify something to do.')

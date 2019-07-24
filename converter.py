@@ -140,7 +140,7 @@ class CameraParam(Enum):
         else:
             return None
 
-    def to_ksh_value(self, val):
+    def to_ksh_value(self, val=0):
         # Convert the vox value to the one that will be printed to the ksh.
         if self == self.ROT_X:
             return int(val * 150.0)
@@ -1019,7 +1019,7 @@ ver=167''', file=file)
 
                     # Camera events.
                     for cam_param in list(CameraParam):
-                        if now in self.events_spcontroller(cam_param) and cam_param.to_ksh_value is not None:
+                        if now in self.events_spcontroller(cam_param) and cam_param.to_ksh_value() is not None:
                             the_change = self.events_spcontroller(cam_param)[now]
                             buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(the_change)}')
 
@@ -1037,10 +1037,13 @@ ver=167''', file=file)
                         if now in self.events_track(i.to_track_num()):
                             press: ButtonPress = self.events_track(i.to_track_num())[now]
                             if press.duration != 0 and i.is_fx():
-                                letter = 'l' if i == Button.FX_L else 'r'
-                                effect_string = f'{self.effect_defines[press.effect].fx_change(press.effect)}' if type(press.effect) is int else \
-                                    press.effect[0].to_ksh_name(press.effect[1])
-                                buffer.meta.append(f'fx-{letter}={effect_string}')
+                                try:
+                                    letter = 'l' if i == Button.FX_L else 'r'
+                                    effect_string = f'{self.effect_defines[press.effect].fx_change(press.effect)}' if type(press.effect) is int else \
+                                        press.effect[0].to_ksh_name(press.effect[1])
+                                    buffer.meta.append(f'fx-{letter}={effect_string}')
+                                except KeyError:
+                                    debug.record_last_exception(tag='button_fx')
 
                             if press.duration != 0:
                                 buffer.buttons[i] = KshLineBuf.ButtonState.HOLD

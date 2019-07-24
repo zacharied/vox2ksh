@@ -774,7 +774,6 @@ class Vox:
         return metadata
 
     def bpm_string(self):
-        # TODO Make sure decimal BPM's are okay.
         if self.get_metadata('bpm_min') == self.get_metadata('bpm_max'):
             return int(int(self.get_metadata('bpm_min')) / 100)
         else:
@@ -819,6 +818,72 @@ class Vox:
                 self._events_spcontroller[control] = res
             return res
         return self._events_spcontroller[control]
+
+    @classmethod
+    def from_file(cls, path):
+        parser = Vox()
+
+        file = open(path, 'r', encoding='cp932')
+        parser.voxfile = file
+
+        filename_array = os.path.basename(path).split('_')
+        with open('data/music_db.xml', encoding='cp932') as db:
+            try:
+                parser.game_id = int(filename_array[0])
+                parser.song_id = int(filename_array[1])
+                parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+                parser.difficulty_idx = os.path.splitext(path)[0][-2]
+            except ValueError:
+                raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
+
+            tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
+
+            if len(tree) == 0:
+                raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
+
+            parser.metadata = tree[0]
+
+        return parser
+
+    def parse(self):
+        line_no = 0
+        section_line_no = 0
+
+        for line in self.voxfile:
+            section_line_no += 1
+            line_no += 1
+            debug.current_line_num = line_no
+
+            line = line.strip()
+
+            if line.startswith('//'):
+                continue
+
+            if line.startswith('#'):
+                token_state = self.State.from_token(line.split('#')[1])
+                if token_state is None:
+                    continue
+                if type(token_state) is tuple:
+                    self.state = token_state[0]
+                    self.state_track = int(token_state[1])
+                else:
+                    self.state = token_state
+                section_line_no = 0
+
+            elif line.startswith('define\t'):
+                splitted = line.split('\t')
+                if len(splitted) != 3:
+                    debug.record(f'define line "{line}" does not have 3 operands')
+                    continue
+
+                self.vox_defines[splitted[1]] = int(splitted[2])
+                if int(splitted[2]) != 0:
+                    self.effect_defines[int(splitted[2])] = KshEffectDefine.from_pre_v4_vox_sound_id(int(splitted[2]))
+
+            elif self.state is not None:
+                self.process_state(line, section_line_no)
+
+        self.finalized = True
 
     def process_state(self, line, section_line_num):
         splitted = line.split('\t')
@@ -1130,71 +1195,6 @@ ver=167''', file=file)
         for k, v in self.effect_defines.items():
             print(v.to_define_line(k), file=file)
 
-    @classmethod
-    def from_file(cls, path):
-        parser = Vox()
-
-        file = open(path, 'r', encoding='cp932')
-        parser.voxfile = file
-
-        filename_array = os.path.basename(path).split('_')
-        with open('data/music_db.xml', encoding='cp932') as db:
-            try:
-                parser.game_id = int(filename_array[0])
-                parser.song_id = int(filename_array[1])
-                parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
-                parser.difficulty_idx = os.path.splitext(path)[0][-2]
-            except ValueError:
-                raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
-
-            tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
-
-            if len(tree) == 0:
-                raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
-
-            parser.metadata = tree[0]
-
-        return parser
-
-    def parse(self):
-        line_no = 0
-        section_line_no = 0
-
-        for line in self.voxfile:
-            section_line_no += 1
-            line_no += 1
-            debug.current_line_num = line_no
-
-            line = line.strip()
-
-            if line.startswith('//'):
-                continue
-
-            if line.startswith('#'):
-                token_state = self.State.from_token(line.split('#')[1])
-                if token_state is None:
-                    continue
-                if type(token_state) is tuple:
-                    self.state = token_state[0]
-                    self.state_track = int(token_state[1])
-                else:
-                    self.state = token_state
-                section_line_no = 0
-
-            elif line.startswith('define\t'):
-                splitted = line.split('\t')
-                if len(splitted) != 3:
-                    debug.record(f'define line "{line}" does not have 3 operands')
-                    continue
-
-                self.vox_defines[splitted[1]] = int(splitted[2])
-                if int(splitted[2]) != 0:
-                    self.effect_defines[int(splitted[2])] = KshEffectDefine.from_pre_v4_vox_sound_id(int(splitted[2]))
-
-            elif self.state is not None:
-                self.process_state(line, section_line_no)
-
-        self.finalized = True
 
 METADATA_FIX = [
     ['\u203E', '~'],

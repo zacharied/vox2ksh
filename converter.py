@@ -178,9 +178,9 @@ class KshootFilter(Enum):
     def from_vox_filter_id(cls, filter_id):
         if filter_id == 0:
             return cls.PEAK
-        elif filter_id == 2:
+        elif filter_id == 1 or filter_id == 2:
             return cls.LOWPASS
-        elif filter_id == 4:
+        elif filter_id == 3 or filter_id == 4:
             return cls.HIGHPASS
         elif filter_id == 5:
             return cls.BITCRUSH

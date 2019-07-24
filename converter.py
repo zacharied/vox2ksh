@@ -1002,7 +1002,7 @@ ver=167''', file=file)
                 # Vox beats are also 1-indexed.
                 beat = b + 1
 
-                for o in range(TICKS_PER_BEAT):
+                for o in range(int(float(TICKS_PER_BEAT) * (4 / current_timesig.bottom))):
                     line_num += 1
 
                     # However, vox offsets are 0-indexed.
@@ -1215,7 +1215,8 @@ CASES = {
     'fx': 'data/vox_11_ifs/004_1014_crystalmissile_fuhringcatmark_5m.vox',
     'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
     'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox',
-    'manual-tilt': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_4i.vox'
+    'manual-tilt': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_4i.vox',
+    'sixeight': 'data/vox_08_ifs/003_0744_ancientgarden_cororo_3e.vox'
 }
 
 debug = Debug()

@@ -112,6 +112,12 @@ class Timing:
             return self.beat - other.beat
         return self.measure - other.measure
 
+class CameraNode:
+    def __init__(self, start_param, end_param, duration):
+        self.start_param = start_param
+        self.end_param = end_param
+        self.duration = duration
+
 class CameraParam(Enum):
     @classmethod
     def from_vox_name(cls, vox_name):
@@ -873,7 +879,7 @@ class Vox:
                 return
 
             if param is not None:
-                self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = float(splitted[4])
+                self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
             if not spcontroller_line_is_normal(param, splitted):
                 debug.record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
 
@@ -974,9 +980,14 @@ ver=167''', file=file)
 
         print('--', file=file)
 
+        class SpControllerCountdown(dataobject):
+            event: CameraNode
+            time_left: int
+
         holds = {}
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slam_status = {}
+        ongoing_spcontroller_events = {x: None for x in list(CameraParam)}
         last_filter = KshootFilter.PEAK
         current_timesig = self.events_timesig()[Timing(1, 1, 0)]
         line_num = 0
@@ -1020,8 +1031,20 @@ ver=167''', file=file)
                     # Camera events.
                     for cam_param in list(CameraParam):
                         if now in self.events_spcontroller(cam_param) and cam_param.to_ksh_value() is not None:
-                            the_change = self.events_spcontroller(cam_param)[now]
-                            buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(the_change)}')
+                            # Beginning of an SpController node here.
+                            if ongoing_spcontroller_events[cam_param] is not None and ongoing_spcontroller_events[cam_param].time_left != 1:
+                                raise KshConvertError(f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
+                            event = self.events_spcontroller(cam_param)[now]
+                            ongoing_spcontroller_events[cam_param] = SpControllerCountdown(event=event, time_left=event.duration)
+                            buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.start_param)}')
+                        elif ongoing_spcontroller_events[cam_param] is not None:
+                            if ongoing_spcontroller_events[cam_param].time_left == 0:
+                                # SpController node ended and there's not another one after.
+                                event = ongoing_spcontroller_events[cam_param].event
+                                buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.end_param)}')
+                                ongoing_spcontroller_events[cam_param] = None
+                            else:
+                                ongoing_spcontroller_events[cam_param].time_left -= 1
 
                     if now in self.events_tiltmode():
                         buffer.meta.append(f'tilt={self.events_tiltmode()[now].to_ksh_name()}')

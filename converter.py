@@ -16,6 +16,8 @@ from os.path import join as pjoin
 
 TICKS_PER_BEAT = 48
 
+SLAM_TICKS = 4
+
 class Debug:
     class State(Enum):
         INPUT = auto()
@@ -546,12 +548,17 @@ class LaserSlam:
 
         if self.start.position == self.end.position:
             raise ValueError('attempt to create a slam with the same start and end')
+        elif self.start.side != self.end.side:
+            raise ValueError('attempt to create a slam with start and end having different sides')
 
     def direction(self):
         if self.start.position > self.end.position:
             return self.Direction.LEFT
         else:
             return self.Direction.RIGHT
+
+    def side(self):
+        return self.start.side
 
 class Difficulty(Enum):
     NOVICE = 0
@@ -769,13 +776,6 @@ class Vox:
         self.difficulty_idx = 0
 
         self.finalized = False
-        self._events_track = {}
-        self._events_bpm = []
-        self._events_timesig = []
-        self._events_tiltmode = []
-        self._events_spcontroller = {}
-
-        self.warnings = 0
 
     def __str__(self):
         return f'{self.get_metadata("ascii")} {self.diff_token()}'
@@ -809,45 +809,9 @@ class Vox:
         else:
             return f'{int(int(self.get_metadata("bpm_min")) / 100)}-{int(int(self.get_metadata("bpm_max")) / 100)}'
 
-    def events_track(self, track):
-        if track not in self._events_track:
-            res = {k[1]: v for k, v in self.events.items() if type(k[0]) is tuple and k[0][0] == EventKind.TRACK and k[0][1] == track}
-            if self.finalized:
-                self._events_track[track] = res
-            return res
-        return self._events_track[track]
-
-    def events_bpm(self):
-        if len(self._events_bpm) == 0:
-            res = {k[1]: v for k, v in self.events.items() if k[0] == EventKind.BPM}
-            if self.finalized:
-                self._events_bpm = res
-            return res
-        return self._events_bpm
-
-    def events_timesig(self):
-        if len(self._events_timesig) == 0:
-            res = {k[1]: v for k, v in self.events.items() if k[0] == EventKind.TIMESIG}
-            if self.finalized:
-                self._events_timesig = res
-            return res
-        return self._events_timesig
-
-    def events_tiltmode(self):
-        if len(self._events_tiltmode) == 0:
-            res = {k[1]: v for k, v in self.events.items() if k[0] == EventKind.TILTMODE}
-            if self.finalized:
-                self._events_tiltmode = res
-            return res
-        return self._events_tiltmode
-
-    def events_spcontroller(self, control):
-        if control not in self._events_spcontroller:
-            res = {k[1]: v for k, v in self.events.items() if type(k[0]) is tuple and k[0][0] == EventKind.SPCONTROLLER and k[0][1] == control}
-            if self.finalized:
-                self._events_spcontroller[control] = res
-            return res
-        return self._events_spcontroller[control]
+    def timing_point(self, timing):
+        if timing not in self.events:
+            self.events[timing] = {}
 
     @classmethod
     def from_file(cls, path):
@@ -921,37 +885,51 @@ class Vox:
         if line == '':
             return
 
+        now = None
+        try:
+            now = Timing.from_time_str(splitted[0])
+            self.timing_point(now)
+        except IndexError:
+            pass
+
         if self.state == self.State.FORMAT_VERSION:
             self.vox_version = int(line)
 
         elif self.state == self.State.BEAT_INFO:
             timesig = TimeSignature(int(splitted[1]), int(splitted[2]))
-            self.events[(EventKind.TIMESIG, Timing.from_time_str(splitted[0]))] = timesig
+            self.events[now][EventKind.TIMESIG] = timesig
 
         elif self.state == self.State.BPM:
-            self.events[(EventKind.BPM, Timing(1, 1, 0))] = float(line)
+            now = Timing(1, 1, 0)
+            self.timing_point(now)
+            self.events[now][EventKind.BPM] = float(line)
 
         elif self.state == self.State.BPM_INFO:
-            self.events[(EventKind.BPM, Timing.from_time_str(splitted[0]))] = splitted[1]
+            if splitted[2] != '4':
+                debug.record(Debug.Level.ABNORMALITY, 'bpm_info', f'non-4 beat division in bpm info: {splitted[2]}')
+            self.events[now][EventKind.BPM] = float(splitted[1])
 
         elif self.state == self.State.TILT_INFO:
             try:
-                self.events[(EventKind.TILTMODE, Timing.from_time_str(splitted[0]))] = TiltMode.from_vox_id(int(splitted[1]))
+                self.events[now][EventKind.TILTMODE] = TiltMode.from_vox_id(int(splitted[1]))
             except ValueError:
                 debug.record_last_exception(level=Debug.Level.WARNING)
 
         elif self.state == self.State.END_POSITION:
-            self.end = Timing.from_time_str(line)
+            self.end = now
 
         elif self.state == self.State.SOUND_ID:
+            # The `define` handler takes care of this outside of this loop.
             debug.record(Debug.Level.WARNING, 'vox_parse', f'({self.state}) line other than a #define was encountered in SOUND ID')
 
         elif self.state == self.State.TAB_EFFECT:
+            # TODO Tab effects
             if TabEffectInfo.line_is_abnormal(section_line_num, line):
                 debug.record(Debug.Level.ABNORMALITY, 'tab_effect', f'tab effect info abnormal: {line}')
 
         elif self.state == self.State.FXBUTTON_EFFECT:
             if self.vox_version < 6:
+                # Below v6, the defines come one after another with no spacing between other than the newline.
                 try:
                     self.effect_defines[section_line_num - 1] = KshEffectDefine.from_effect_info_line(line)
                 except ValueError:
@@ -982,7 +960,7 @@ class Vox:
                 return
 
             if param is not None:
-                self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
+                self.events[now][(EventKind.SPCONTROLLER, param)] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
             if not spcontroller_line_is_normal(param, splitted):
                 debug.record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
 
@@ -1006,22 +984,20 @@ class Vox:
                 laser_node = LaserNode(laser_node)
 
                 # Check if it's a slam.
-                slam_start = self.events_track(self.state_track).get(Timing.from_time_str(splitted[0]))
-                if Timing.from_time_str(splitted[0]) == self.last_time:
+                if (EventKind.TRACK, self.state_track) in self.events[now]:
                     self.new_laser = False
                 else:
                     self.new_laser = True
 
-                events_key = ((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))
-                if self.new_laser:
-                    self.events[events_key] = laser_node
+                if not (EventKind.TRACK, self.state_track) in self.events[now]:
+                    self.events[now][(EventKind.TRACK, self.state_track)] = laser_node
                 else:
+                    slam_start = self.events[now][(EventKind.TRACK, self.state_track)]
                     if type(slam_start) is LaserSlam:
+                        # A few charts have three laser nodes at the same time point for some reason.
                         slam_start = slam_start.end
                     slam = LaserSlam(slam_start, laser_node)
-                    self.events[events_key] = slam
-
-                self.last_time = Timing.from_time_str(splitted[0])
+                    self.events[now][(EventKind.TRACK, self.state_track)] = slam
 
             else:
                 try:
@@ -1042,7 +1018,7 @@ class Vox:
                     else:
                         fx_data = int(splitted[2]) - 2
 
-                self.events[((EventKind.TRACK, self.state_track), Timing.from_time_str(splitted[0]))] = ButtonPress(button, int(splitted[1]), fx_data)
+                self.events[now][(EventKind.TRACK, self.state_track)]= ButtonPress(button, int(splitted[1]), fx_data)
 
 
     def write_to_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
@@ -1092,7 +1068,7 @@ ver=167''', file=file)
         slam_status = {}
         ongoing_spcontroller_events = {x: None for x in list(CameraParam)}
         last_filter = KshootFilter.PEAK
-        current_timesig = self.events_timesig()[Timing(1, 1, 0)]
+        current_timesig = self.events[Timing(1, 1, 0)][EventKind.TIMESIG]
         line_num = 0
 
         measure_iter = range(self.end.measure)
@@ -1103,13 +1079,15 @@ ver=167''', file=file)
         for m in measure_iter:
             measure = m + 1
 
+            print(f'// {measure}', file=file)
+
             # Laser range resets every measure in ksh.
             laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
 
             now = Timing(measure, 1, 0)
 
-            if now in self.events_timesig():
-                current_timesig = self.events_timesig()[now]
+            if now in self.events and EventKind.TIMESIG in self.events[now]:
+                current_timesig = self.events[now][EventKind.TIMESIG]
                 print(f'beat={current_timesig.top}/{current_timesig.bottom}', file=file)
 
             for b in range(current_timesig.top):
@@ -1125,106 +1103,119 @@ ver=167''', file=file)
 
                     buffer = KshLineBuf()
 
-                    if now.beat > 1 and now.offset > 0 and now in self.events_timesig():
-                        raise KshConvertError('time signature change in the middle of a measure')
+                    if now in self.events:
+                        for kind, event in self.events[now].items():
+                            if kind == EventKind.TIMESIG and (beat != 1 or o != 0):
+                                raise KshConvertError('time signature change in the middle of a measure')
 
-                    if now in self.events_bpm():
-                        buffer.meta.append(f't={str(self.events_bpm()[now]).rstrip("0").rstrip(".").strip()}')
+                            elif kind == EventKind.BPM:
+                                event: float
+                                buffer.meta.append(f't={str(event).rstrip("0").rstrip(".").strip()}')
 
-                    # Camera events.
-                    for cam_param in list(CameraParam):
-                        if now in self.events_spcontroller(cam_param) and cam_param.to_ksh_value() is not None:
-                            # Beginning of an SpController node here.
-                            if ongoing_spcontroller_events[cam_param] is not None and ongoing_spcontroller_events[cam_param].time_left != 1:
-                                raise KshConvertError(f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
-                            event = self.events_spcontroller(cam_param)[now]
-                            ongoing_spcontroller_events[cam_param] = SpControllerCountdown(event=event, time_left=event.duration)
-                            buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.start_param)}')
-                        elif ongoing_spcontroller_events[cam_param] is not None:
-                            if ongoing_spcontroller_events[cam_param].time_left == 0:
-                                # SpController node ended and there's not another one after.
-                                event = ongoing_spcontroller_events[cam_param].event
-                                buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.end_param)}')
-                                ongoing_spcontroller_events[cam_param] = None
-                            else:
-                                ongoing_spcontroller_events[cam_param].time_left -= 1
+                            elif type(kind) is tuple and kind[0] == EventKind.SPCONTROLLER:
+                                event: CameraNode
+                                cam_param: CameraParam = kind[1]
+                                if cam_param.to_ksh_value() is not None:
+                                    if ongoing_spcontroller_events[cam_param] is not None and ongoing_spcontroller_events[cam_param].time_left != 0:
+                                        raise KshConvertError(f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
+                                    ongoing_spcontroller_events[cam_param] = SpControllerCountdown(event=event, time_left=event.duration)
+                                    buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.start_param)}')
 
-                    if now in self.events_tiltmode():
-                        buffer.meta.append(f'tilt={self.events_tiltmode()[now].to_ksh_name()}')
+                            elif kind == EventKind.TILTMODE:
+                                event: TiltMode
+                                buffer.meta.append(f'tilt={event.to_ksh_name()}')
 
-                    for i in list(Button):
-                        if i in holds:
-                            holds[i] -= 1
-                            if holds[i] == 0:
-                                del holds[i]
-                            else:
-                                buffer.buttons[i] = KshLineBuf.ButtonState.HOLD
+                            elif type(kind) is tuple and kind[0] == EventKind.TRACK:
+                                if kind[1] == 1 or kind[1] == 8:
+                                    # Laser
+                                    if type(event) is LaserSlam:
+                                        event: LaserSlam
+                                        # TODO Laser countdown for different timesigs
+                                        laser = event.start
 
-                        if now in self.events_track(i.to_track_num()):
-                            press: ButtonPress = self.events_track(i.to_track_num())[now]
-                            if press.duration != 0 and i.is_fx():
-                                try:
-                                    letter = 'l' if i == Button.FX_L else 'r'
-                                    effect_string = f'{self.effect_defines[press.effect].fx_change(press.effect)}' if type(press.effect) is int else \
-                                        press.effect[0].to_ksh_name(press.effect[1])
-                                    buffer.meta.append(f'fx-{letter}={effect_string}')
-                                except KeyError:
-                                    debug.record_last_exception(tag='button_fx')
+                                        if event.side in map(lambda x: x.side(), slam_status):
+                                            raise KshConvertError('new laser node spawn while trying to resolve slam')
 
-                            if press.duration != 0:
-                                buffer.buttons[i] = KshLineBuf.ButtonState.HOLD
-                                holds[i] = press.duration
-                            else:
-                                buffer.buttons[i] = KshLineBuf.ButtonState.PRESS
+                                        slam_status[event] = SLAM_TICKS
+                                        if laser.spin_division != 0:
+                                            if buffer.spin != '':
+                                                debug.record(Debug.Level.WARNING, 'ksh_laser', 'spin on both lasers')
+
+                                            buffer.spin = '@'
+                                            if event.direction() == LaserSlam.Direction.LEFT:
+                                                buffer.spin += '('
+                                            else:
+                                                buffer.spin += ')'
+
+                                            buffer.spin += str(int(192 / event.start.spin_division))
+                                        event: LaserNode = event.start
+
+                                    event: LaserNode
+
+                                    if event.range != laser_range[event.side]:
+                                        buffer.meta.append(f'laserrange_{event.side.to_letter()}={event.range}x')
+                                        laser_range[event.side] = event.range
+
+                                    if event.filter != last_filter:
+                                        buffer.meta.append(f'filtertype={event.filter.to_ksh_name()}')
+                                        last_filter = event.filter
+
+                                    if event.node_type == LaserCont.START:
+                                        lasers[event.side] = True
+                                    elif event.node_type == LaserCont.END:
+                                        lasers[event.side] = False
+                                    buffer.lasers[event.side] = event.position_ksh()
+
+                                else:
+                                    # Button
+                                    event: ButtonPress
+                                    if event.duration != 0:
+                                        if event.button.is_fx():
+                                            try:
+                                                letter = 'l' if event.button == Button.FX_L else 'r'
+                                                effect_string = f'{self.effect_defines[event.effect].fx_change(event.effect)}' if type(event.effect) is int else \
+                                                    event.effect[0].to_ksh_name(event.effect[1])
+                                                buffer.meta.append(f'fx-{letter}={effect_string}')
+                                            except KeyError:
+                                                debug.record_last_exception(tag='button_fx')
+                                        buffer.buttons[event.button] = KshLineBuf.ButtonState.HOLD
+                                        holds[event.button] = event.duration
+                                    else:
+                                        buffer.buttons[event.button] = KshLineBuf.ButtonState.PRESS
+
+                    # Loop end stuff.
+                    for cam_param in [x for x in ongoing_spcontroller_events.keys() if ongoing_spcontroller_events[x] is not None]:
+                        if ongoing_spcontroller_events[cam_param].time_left == 0:
+                            # SpController node ended and there's not another one after.
+                            event = ongoing_spcontroller_events[cam_param].event
+                            buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.end_param)}')
+                            ongoing_spcontroller_events[cam_param] = None
+                        else:
+                            ongoing_spcontroller_events[cam_param].time_left -= 1
+
+                    holds_temp = holds.copy()
+                    for button in holds.keys():
+                        if holds_temp[button] == 0:
+                            del holds_temp[button]
+                        else:
+                            buffer.buttons[button] = KshLineBuf.ButtonState.HOLD
+                            holds_temp[button] -= 1
+                    holds = holds_temp
 
                     for side in list(LaserSide):
-                        if now in self.events_track(side.to_track_num()) and side in slam_status:
-                            raise KshConvertError(self.voxfile.name, file.name, line_num, 'new laser node spawn while trying to resolve slam')
-                        elif now in self.events_track(side.to_track_num()):
-                            laser = self.events_track(side.to_track_num())[now]
-                        elif side in slam_status:
-                            if slam_status[side][1] == 0:
-                                laser = slam_status[side][0].end
-                                del slam_status[side]
-                            else:
-                                buffer.lasers[side] = ':'
-                                slam_status[side][1] -= 1
-                                continue
+                        if buffer.lasers[side] == '-' and lasers[side]:
+                            buffer.lasers[side] = ':'
+
+                    for slam in reversed(list(slam_status.keys())):
+                        if slam_status[slam] == 0:
+                            buffer.lasers[slam.side()] = slam.end.position_ksh()
+                            del slam_status[slam]
+                            if slam.end.node_type == LaserCont.END:
+                                lasers[slam.side()] = False
                         else:
-                            if lasers[side]:
-                                buffer.lasers[side] = ':'
-                            else:
-                                buffer.lasers[side] = '-'
-                            continue
-
-                        if type(laser) is LaserSlam:
-                            slam_status[side] = [laser, 3]
-                            if laser.start.spin_division != 0:
-                                if buffer.spin != '':
-                                    debug.record(Debug.Level.WARNING, 'ksh_laser', 'spin on both lasers')
-
-                                buffer.spin = '@'
-                                if laser.direction() == LaserSlam.Direction.LEFT:
-                                    buffer.spin += '('
-                                else:
-                                    buffer.spin += ')'
-
-                                buffer.spin += str(int(192 / laser.start.spin_division))
-                            laser = laser.start
-
-                        if laser.range != laser_range[side]:
-                            buffer.meta.append(f'laserrange_{side.to_letter()}={laser.range}x')
-                            laser_range[side] = laser.range
-
-                        if laser.filter != last_filter:
-                            buffer.meta.append(f'filtertype={laser.filter.to_ksh_name()}')
-                            last_filter = laser.filter
-
-                        if laser.node_type == LaserCont.START:
-                            lasers[side] = True
-                        elif laser.node_type == LaserCont.END:
-                            lasers[side] = False
-                        buffer.lasers[side] = laser.position_ksh()
+                            if slam_status[slam] < SLAM_TICKS:
+                                buffer.lasers[slam.side()] = ':'
+                            slam_status[slam] -= 1
 
                     print(buffer.out(), file=file)
 

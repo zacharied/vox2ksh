@@ -62,6 +62,10 @@ class RevMap:
     def rev(self, k):
         return self._rev.get(k)
 
+def truncate(x, digits) -> float:
+    stepper = 10.0 ** digits
+    return math.trunc(stepper * x) / stepper
+
 TimeSignature = namedtuple('TimeSignature', 'top bottom')
 
 class VoxLoadError(Exception):
@@ -108,6 +112,12 @@ class Timing:
             return self.beat - other.beat
         return self.measure - other.measure
 
+class CameraNode:
+    def __init__(self, start_param, end_param, duration):
+        self.start_param = start_param
+        self.end_param = end_param
+        self.duration = duration
+
 class CameraParam(Enum):
     @classmethod
     def from_vox_name(cls, vox_name):
@@ -121,6 +131,8 @@ class CameraParam(Enum):
             return cls.AIRL_SCAX
         elif vox_name == 'AIRR_ScaX':
             return cls.AIRR_SCAX
+        elif vox_name == 'Tilt':
+            return cls.TILT
 
         raise ValueError(f'invalid camera param "{vox_name}"')
 
@@ -129,14 +141,19 @@ class CameraParam(Enum):
             return 'zoom_top'
         elif self == self.RAD_I:
             return 'zoom_bottom'
+        elif self == self.TILT:
+            return 'tilt'
         else:
             return None
 
-    def scaling_factor(self):
+    def to_ksh_value(self, val=0):
+        # Convert the vox value to the one that will be printed to the ksh.
         if self == self.ROT_X:
-            return 150.0
+            return int(val * 150.0)
         elif self == self.RAD_I:
-            return -150.0
+            return int(val * -150.0)
+        elif self == self.TILT:
+            return truncate(val * -1.0, 1)
         return None
 
     ROT_X = auto()
@@ -144,6 +161,7 @@ class CameraParam(Enum):
     REALIZE = auto()
     AIRL_SCAX = auto()
     AIRR_SCAX = auto()
+    TILT = auto()
 
 def spcontroller_line_is_normal(param, splitted):
     cell = lambda i: splitted[i].strip()
@@ -160,9 +178,9 @@ class KshootFilter(Enum):
     def from_vox_filter_id(cls, filter_id):
         if filter_id == 0:
             return cls.PEAK
-        elif filter_id == 2:
+        elif filter_id == 1 or filter_id == 2:
             return cls.LOWPASS
-        elif filter_id == 4:
+        elif filter_id == 3 or filter_id == 4:
             return cls.HIGHPASS
         elif filter_id == 5:
             return cls.BITCRUSH
@@ -393,6 +411,29 @@ class KshEffectDefine:
             raise ValueError(f'effect define id {splitted[0]} is not supported')
 
         return define
+
+class TabEffectInfo:
+    # TODO This is a placeholder
+    @staticmethod
+    def line_is_abnormal(line_num, line):
+        line = line.strip()
+        if line_num == 1:
+            return line != '1,	90.00,	400.00,	18000.00,	0.70'
+        elif line_num == 2:
+            return line != '1,	90.00,	600.00,	15000.00,	5.00'
+        elif line_num == 3:
+            return line != '2,	90.00,	40.00,	5000.00,	0.70'
+        elif line_num == 4:
+            return line != '2,	90.00,	40.00,	2000.00,	3.00'
+        elif line_num == 5:
+            return line != '3,	100.00,	30'
+        raise ValueError(f'invalid line number {line_num}')
+
+class TabParamAssignInfo:
+    # TODO This is a placeholder.
+    @staticmethod
+    def line_is_abnormal(line):
+        return not line.endswith('0,	0.00,	0.00')
 
 class Button(Enum):
     BT_A = auto()
@@ -683,8 +724,12 @@ class Vox:
                 return cls.FXBUTTON_EFFECT
             elif token == 'SPCONTROLER' or token == 'SPCONTROLLER':
                 return cls.SPCONTROLLER
+            elif token == 'TAB EFFECT INFO':
+                return cls.TAB_EFFECT
+            elif token == 'TAB PARAM ASSIGN INFO':
+                return cls.TAB_PARAM_ASSIGN
             elif token == 'TRACK AUTO TAB':
-                return None
+                return cls.AUTO_TAB
             elif token.startswith('TRACK'):
                 return cls.TRACK, int(token[5])
 
@@ -696,8 +741,11 @@ class Vox:
         BEAT_INFO = auto()
         END_POSITION = auto()
         SOUND_ID = auto()
+        TAB_EFFECT = auto()
         FXBUTTON_EFFECT = auto()
+        TAB_PARAM_ASSIGN = auto()
         TRACK = auto()
+        AUTO_TAB = auto()
         SPCONTROLLER = auto()
 
     def __init__(self):
@@ -756,7 +804,6 @@ class Vox:
         return metadata
 
     def bpm_string(self):
-        # TODO Make sure decimal BPM's are okay.
         if self.get_metadata('bpm_min') == self.get_metadata('bpm_max'):
             return int(int(self.get_metadata('bpm_min')) / 100)
         else:
@@ -802,6 +849,72 @@ class Vox:
             return res
         return self._events_spcontroller[control]
 
+    @classmethod
+    def from_file(cls, path):
+        parser = Vox()
+
+        file = open(path, 'r', encoding='cp932')
+        parser.voxfile = file
+
+        filename_array = os.path.basename(path).split('_')
+        with open('data/music_db.xml', encoding='cp932') as db:
+            try:
+                parser.game_id = int(filename_array[0])
+                parser.song_id = int(filename_array[1])
+                parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+                parser.difficulty_idx = os.path.splitext(path)[0][-2]
+            except ValueError:
+                raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
+
+            tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
+
+            if len(tree) == 0:
+                raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
+
+            parser.metadata = tree[0]
+
+        return parser
+
+    def parse(self):
+        line_no = 0
+        section_line_no = 0
+
+        for line in self.voxfile:
+            section_line_no += 1
+            line_no += 1
+            debug.current_line_num = line_no
+
+            line = line.strip()
+
+            if line.startswith('//'):
+                continue
+
+            if line.startswith('#'):
+                token_state = self.State.from_token(line.split('#')[1])
+                if token_state is None:
+                    continue
+                if type(token_state) is tuple:
+                    self.state = token_state[0]
+                    self.state_track = int(token_state[1])
+                else:
+                    self.state = token_state
+                section_line_no = 0
+
+            elif line.startswith('define\t'):
+                splitted = line.split('\t')
+                if len(splitted) != 3:
+                    debug.record(f'define line "{line}" does not have 3 operands')
+                    continue
+
+                self.vox_defines[splitted[1]] = int(splitted[2])
+                if int(splitted[2]) != 0:
+                    self.effect_defines[int(splitted[2])] = KshEffectDefine.from_pre_v4_vox_sound_id(int(splitted[2]))
+
+            elif self.state is not None:
+                self.process_state(line, section_line_no)
+
+        self.finalized = True
+
     def process_state(self, line, section_line_num):
         splitted = line.split('\t')
 
@@ -833,6 +946,10 @@ class Vox:
         elif self.state == self.State.SOUND_ID:
             debug.record(Debug.Level.WARNING, 'vox_parse', f'({self.state}) line other than a #define was encountered in SOUND ID')
 
+        elif self.state == self.State.TAB_EFFECT:
+            if TabEffectInfo.line_is_abnormal(section_line_num, line):
+                debug.record(Debug.Level.ABNORMALITY, 'tab_effect', f'tab effect info abnormal: {line}')
+
         elif self.state == self.State.FXBUTTON_EFFECT:
             if self.vox_version < 6:
                 try:
@@ -853,6 +970,10 @@ class Vox:
                             self.effect_defines[index] = KshEffectDefine.default_effect()
                             debug.record_last_exception(level=Debug.Level.WARNING, tag='fx_load')
 
+        elif self.state == self.State.TAB_PARAM_ASSIGN:
+            if TabParamAssignInfo.line_is_abnormal(line):
+                debug.record(Debug.Level.ABNORMALITY, 'tab_param_assign', f'tab param assign info abnormal: {line}')
+
         elif self.state == self.State.SPCONTROLLER:
             try:
                 param = CameraParam.from_vox_name(splitted[1])
@@ -861,7 +982,7 @@ class Vox:
                 return
 
             if param is not None:
-                self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = float(splitted[4])
+                self.events[((EventKind.SPCONTROLLER, param), Timing.from_time_str(splitted[0]))] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
             if not spcontroller_line_is_normal(param, splitted):
                 debug.record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
 
@@ -962,9 +1083,14 @@ ver=167''', file=file)
 
         print('--', file=file)
 
+        class SpControllerCountdown(dataobject):
+            event: CameraNode
+            time_left: int
+
         holds = {}
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slam_status = {}
+        ongoing_spcontroller_events = {x: None for x in list(CameraParam)}
         last_filter = KshootFilter.PEAK
         current_timesig = self.events_timesig()[Timing(1, 1, 0)]
         line_num = 0
@@ -990,7 +1116,7 @@ ver=167''', file=file)
                 # Vox beats are also 1-indexed.
                 beat = b + 1
 
-                for o in range(TICKS_PER_BEAT):
+                for o in range(int(float(TICKS_PER_BEAT) * (4 / current_timesig.bottom))):
                     line_num += 1
 
                     # However, vox offsets are 0-indexed.
@@ -1007,9 +1133,21 @@ ver=167''', file=file)
 
                     # Camera events.
                     for cam_param in list(CameraParam):
-                        if cam_param.scaling_factor() is not None and now in self.events_spcontroller(cam_param):
-                            the_change = self.events_spcontroller(cam_param)[now]
-                            buffer.meta.append(f'{cam_param.to_ksh_name()}={int(the_change * cam_param.scaling_factor())}')
+                        if now in self.events_spcontroller(cam_param) and cam_param.to_ksh_value() is not None:
+                            # Beginning of an SpController node here.
+                            if ongoing_spcontroller_events[cam_param] is not None and ongoing_spcontroller_events[cam_param].time_left != 1:
+                                raise KshConvertError(f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
+                            event = self.events_spcontroller(cam_param)[now]
+                            ongoing_spcontroller_events[cam_param] = SpControllerCountdown(event=event, time_left=event.duration)
+                            buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.start_param)}')
+                        elif ongoing_spcontroller_events[cam_param] is not None:
+                            if ongoing_spcontroller_events[cam_param].time_left == 0:
+                                # SpController node ended and there's not another one after.
+                                event = ongoing_spcontroller_events[cam_param].event
+                                buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.end_param)}')
+                                ongoing_spcontroller_events[cam_param] = None
+                            else:
+                                ongoing_spcontroller_events[cam_param].time_left -= 1
 
                     if now in self.events_tiltmode():
                         buffer.meta.append(f'tilt={self.events_tiltmode()[now].to_ksh_name()}')
@@ -1025,10 +1163,13 @@ ver=167''', file=file)
                         if now in self.events_track(i.to_track_num()):
                             press: ButtonPress = self.events_track(i.to_track_num())[now]
                             if press.duration != 0 and i.is_fx():
-                                letter = 'l' if i == Button.FX_L else 'r'
-                                effect_string = f'{self.effect_defines[press.effect].fx_change(press.effect)}' if type(press.effect) is int else \
-                                    press.effect[0].to_ksh_name(press.effect[1])
-                                buffer.meta.append(f'fx-{letter}={effect_string}')
+                                try:
+                                    letter = 'l' if i == Button.FX_L else 'r'
+                                    effect_string = f'{self.effect_defines[press.effect].fx_change(press.effect)}' if type(press.effect) is int else \
+                                        press.effect[0].to_ksh_name(press.effect[1])
+                                    buffer.meta.append(f'fx-{letter}={effect_string}')
+                                except KeyError:
+                                    debug.record_last_exception(tag='button_fx')
 
                             if press.duration != 0:
                                 buffer.buttons[i] = KshLineBuf.ButtonState.HOLD
@@ -1092,71 +1233,6 @@ ver=167''', file=file)
         for k, v in self.effect_defines.items():
             print(v.to_define_line(k), file=file)
 
-    @classmethod
-    def from_file(cls, path):
-        parser = Vox()
-
-        file = open(path, 'r', encoding='cp932')
-        parser.voxfile = file
-
-        filename_array = os.path.basename(path).split('_')
-        with open('data/music_db.xml', encoding='cp932') as db:
-            try:
-                parser.game_id = int(filename_array[0])
-                parser.song_id = int(filename_array[1])
-                parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
-                parser.difficulty_idx = os.path.splitext(path)[0][-2]
-            except ValueError:
-                raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
-
-            tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
-
-            if len(tree) == 0:
-                raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
-
-            parser.metadata = tree[0]
-
-        return parser
-
-    def parse(self):
-        line_no = 0
-        section_line_no = 0
-
-        for line in self.voxfile:
-            section_line_no += 1
-            line_no += 1
-            debug.current_line_num = line_no
-
-            line = line.strip()
-
-            if line.startswith('//'):
-                continue
-
-            if line.startswith('#'):
-                token_state = self.State.from_token(line.split('#')[1])
-                if token_state is None:
-                    continue
-                if type(token_state) is tuple:
-                    self.state = token_state[0]
-                    self.state_track = int(token_state[1])
-                else:
-                    self.state = token_state
-                section_line_no = 0
-
-            elif line.startswith('define\t'):
-                splitted = line.split('\t')
-                if len(splitted) != 3:
-                    debug.record(f'define line "{line}" does not have 3 operands')
-                    continue
-
-                self.vox_defines[splitted[1]] = int(splitted[2])
-                if int(splitted[2]) != 0:
-                    self.effect_defines[int(splitted[2])] = KshEffectDefine.from_pre_v4_vox_sound_id(int(splitted[2]))
-
-            elif self.state is not None:
-                self.process_state(line, section_line_no)
-
-        self.finalized = True
 
 METADATA_FIX = [
     ['\u203E', '~'],
@@ -1199,7 +1275,9 @@ CASES = {
     'double-fx': 'data/vox_12_ifs/004_1136_freedomdive_xi_2a.vox',
     'fx': 'data/vox_11_ifs/004_1014_crystalmissile_fuhringcatmark_5m.vox',
     'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
-    'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox'
+    'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox',
+    'manual-tilt': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_4i.vox',
+    'sixeight': 'data/vox_08_ifs/003_0744_ancientgarden_cororo_3e.vox'
 }
 
 debug = Debug()

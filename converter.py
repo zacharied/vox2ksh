@@ -1408,7 +1408,7 @@ if args.convert:
             src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
 
             if vox.difficulty == Difficulty.INFINITE:
-                src_audio_path_diff = f'{splitx(src_audio_path)[0]} [INF]{splitx(src_audio_path)[1]}'
+                src_audio_path_diff = f'{splitx(src_audio_path)[0]}_4i{splitx(src_audio_path)[1]}'
                 if os.path.exists(src_audio_path_diff):
                     print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
                     src_audio_path = src_audio_path_diff

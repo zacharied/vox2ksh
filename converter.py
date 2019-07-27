@@ -264,21 +264,22 @@ class KshEffectDefine:
 
         if sound_id == 2:
             define.effect = KshootEffect.RETRIGGER
-            define.main_param = '1/8'
+            define.main_param = '8'
         elif sound_id == 3:
             define.effect = KshootEffect.RETRIGGER
-            define.main_param = '1/16'
+            define.main_param = '16'
         elif sound_id == 4:
             define.effect = KshootEffect.GATE
-            define.main_param = '1/16'
+            define.main_param = '16'
         elif sound_id == 5:
             define.effect = KshootEffect.FLANGER # TODO Tweak
+            define.main_param = '200' # TODO Screw you USC (by default, flangers have no effect)
         elif sound_id == 6:
             define.effect = KshootEffect.RETRIGGER
-            define.main_param = '1/32'
+            define.main_param = '32'
         elif sound_id == 7:
             define.effect = KshootEffect.GATE
-            define.main_param = '1/8'
+            define.main_param = '8'
         elif sound_id == 8:
             define.effect = KshootEffect.PITCHSHIFT
             define.main_param = '8' # TODO Tweak
@@ -1268,7 +1269,8 @@ CASES = {
     'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
     'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox',
     'manual-tilt': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_4i.vox',
-    'sixeight': 'data/vox_08_ifs/003_0744_ancientgarden_cororo_3e.vox'
+    'sixeight': 'data/vox_08_ifs/003_0744_ancientgarden_cororo_3e.vox',
+    'old-vox-retrigger-fix': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_3e.vox'
 }
 
 debug = Debug()

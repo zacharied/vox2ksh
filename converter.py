@@ -1179,7 +1179,7 @@ ver=167''', file=file)
 
                                             # Not exactly sure what's happening with spins so I'll multiply divisor by 2 for the time being.
                                             # TODO Find a track with a shit ton of spins and investigate.
-                                            buffer.spin += str(int(192 / (event.start.spin_division * 2.5)))
+                                            buffer.spin += str(int(192 / (event.start.spin_division * 1.7)))
                                         event: LaserNode = event.start
 
                                     event: LaserNode

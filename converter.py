@@ -332,7 +332,7 @@ class KshEffectDefine:
             else:
                 define.main_param = int((4 / float(splitted[3])) * float(splitted[1]))
                 define.params['waveLength'] = f'1/{define.main_param}'
-                define.params['updatePeriod'] = f"1/{4 / int(float(splitted[3]))}"
+                define.params['updatePeriod'] = f"1/{int(4 / int(float(splitted[3])))}"
             rate = f'{int(float(splitted[5]) * 100)}%'
             feedback_level = f'{int(float(splitted[4]) * 100)}%'
 
@@ -344,6 +344,7 @@ class KshEffectDefine:
                 if splitted[0] == '8':
                     define.params['updatePeriod'] = 0
                 define.params['updateTrigger'] = 'off>on' if splitted[0] == '8' else 'off'
+                define.main_param = f'{define.main_param};{feedback_level}'
             elif float(splitted[3]) < 0:
                 define.params['rate'] = rate
             else:

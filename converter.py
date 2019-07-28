@@ -203,6 +203,22 @@ class KshootFilter(Enum):
     HIGHPASS = auto()
     BITCRUSH = auto()
 
+class FxChipSound(Enum):
+    @classmethod
+    def from_vox(cls, sound_id):
+        if sound_id == 2:
+            return cls.CLAP
+        raise ValueError(f'unknown FX chip sound id {sound_id}')
+
+    def to_ksh(self):
+        if self == self.CLAP:
+            return 'clap'
+        elif self == self.SNARE:
+            return 'snare'
+
+    CLAP = auto()
+    SNARE = auto()
+
 class KshootEffect(Enum):
     @classmethod
     @cache(maxsize=None)
@@ -586,6 +602,19 @@ class Difficulty(Enum):
 
     def to_letter(self):
         return self._letter().get(self)
+
+    @classmethod
+    def from_number(cls, num):
+        if num == 1:
+            return cls.NOVICE
+        elif num == 2:
+            return cls.ADVANCED
+        elif num == 3:
+            return cls.EXHAUST
+        elif num == 4:
+            return cls.INFINITE
+        elif num == 5:
+            return cls.MAXIMUM
 
     def to_ksh_name(self):
         """ Convert to a name recognized by KSM. """
@@ -1311,7 +1340,6 @@ argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
 argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
 argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')
 argparser.add_argument('-n', '--no-media', action='store_true')
-argparser.add_argument('-c', '--convert', action='store_true')
 args = argparser.parse_args()
 
 AUDIO_EXTENSION = '.ogg'
@@ -1327,7 +1355,7 @@ if not args.no_media:
             if os.path.basename(f) == 'jk':
                 continue
             try:
-                if splitx(f)[1] == '.ogg':
+                if splitx(f)[1] == '.ogg' and not f.endswith('_4i.ogg'):
                     ID_TO_AUDIO[int(splitx(os.path.basename(f))[0])] = f
             except ValueError as e:
                 print(e)
@@ -1341,129 +1369,125 @@ if args.testcase:
             print('\t' + c, file=sys.stderr)
         exit(1)
 
-if args.convert:
-    # Create output directory.
-    if not os.path.exists('out'):
-        print(f'Creating output directory.')
-        os.mkdir('out')
+# Create output directory.
+if not os.path.exists('out'):
+    print(f'Creating output directory.')
+    os.mkdir('out')
 
-    candidates = []
+candidates = []
 
-    for dirpath, dirnames, filenames in os.walk(VOX_ROOT):
-        for filename in filenames:
-            if (args.song_id is None and args.testcase is None) or \
-                    (args.song_id is not None and f'_{args.song_id}_' in filename) or \
-                    (args.testcase is not None and pjoin(dirpath, filename).replace('\\', '/') == CASES[args.testcase]):
-                candidates.append(pjoin(dirpath, filename))
+for dirpath, dirnames, filenames in os.walk(VOX_ROOT):
+    for filename in filenames:
+        if (args.song_id is None and args.testcase is None) or \
+                (args.song_id is not None and f'_{args.song_id}_' in filename) or \
+                (args.testcase is not None and pjoin(dirpath, filename).replace('\\', '/') == CASES[args.testcase]):
+            candidates.append(pjoin(dirpath, filename))
 
-    print('The following files will be processed:')
-    for f in candidates:
-        print(f'\t{f}')
+print('The following files will be processed:')
+for f in candidates:
+    print(f'\t{f}')
 
-    # Load source directory.
-    for vox_path in candidates:
-        debug.state = Debug.State.INPUT
-        debug.input_filename = vox_path
-        debug.output_filename = None
-        debug.reset()
+# Load source directory.
+for vox_path in candidates:
+    debug.state = Debug.State.INPUT
+    debug.input_filename = vox_path
+    debug.output_filename = None
+    debug.reset()
 
-        print(f'{vox_path}:')
+    print(f'{vox_path}:')
+    try:
+        vox = Vox.from_file(vox_path)
+    except Exception:
+        debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
+        continue
+
+    try:
+        print(f'> Processing "{vox_path}": "{str(vox)}"')
+    except (AttributeError, LookupError):
+        print('An error occurred with loading the metadata.')
+        debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
+        continue
+
+    # First try to parse the file.
+    try:
+        vox.parse()
+    except Exception as e:
+        print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
+        debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
+        continue
+
+    song_dir = f'out/{vox.get_metadata("ascii")}'
+    if not os.path.isdir(song_dir):
+        print(f'> Creating song directory "{song_dir}".')
+        os.mkdir(song_dir)
+
+    preview_basename = copy_preview(vox, song_dir)
+    if args.preview_only:
+        continue
+
+    fallback_jacket_diff_idx = None
+
+    using_difficulty_audio = False
+
+    if not args.no_media:
+        target_audio_path = song_dir + '/track.ogg'
+
+        src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
+
+        if vox.difficulty == Difficulty.INFINITE:
+            src_audio_path_diff = f'{splitx(src_audio_path)[0]}_4i{splitx(src_audio_path)[1]}'
+            if os.path.exists(src_audio_path_diff):
+                print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
+                src_audio_path = src_audio_path_diff
+                target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
+                using_difficulty_audio = True
+
+        if not os.path.exists(target_audio_path):
+            print(f'> Copying audio file {src_audio_path} to song directory.')
+            copyfile(src_audio_path, target_audio_path)
+        else:
+            print(f'> Audio file "{target_audio_path}" already exists.')
+
+        src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+        src_jacket_path = args.jacket_dir + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
+
+        if os.path.exists(src_jacket_path):
+            target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+            print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+            copyfile(src_jacket_path, target_jacket_path)
+        else:
+            print(f'> Could not find jacket image file. Checking easier diffs.')
+            fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+            while True:
+                if fallback_jacket_diff_idx < 0:
+                    print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                    fallback_jacket_diff_idx = ''
+                    break
+
+                easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
+                if os.path.exists(easier_jacket_path):
+                    # We found the diff number with the jacket.
+                    print(f'> Using jacket "{easier_jacket_path}".')
+                    break
+                fallback_jacket_diff_idx -= 1
+
+    chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+
+    debug.output_filename = chart_path
+    debug.state = Debug.State.OUTPUT
+
+    print(f'> Writing KSH data to "{chart_path}".')
+    with open(chart_path, "w+", encoding='utf-8') as ksh_file:
         try:
-            vox = Vox.from_file(vox_path)
-        except Exception:
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
-            continue
-
-        try:
-            print(f'> Processing "{vox_path}": "{str(vox)}"')
-        except (AttributeError, LookupError):
-            print('An error occurred with loading the metadata.')
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
-            continue
-
-        # First try to parse the file.
-        try:
-            vox.parse()
+            vox.write_to_ksh(file=ksh_file,
+                       jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
+                       track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
+                       preview_basename=preview_basename)
         except Exception as e:
-            print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
+            print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
+            debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
             continue
+        print(f'> Finished conversion with {debug.exceptions_count[Debug.Level.ABNORMALITY]} abnormalities, {debug.exceptions_count[Debug.Level.WARNING]} warnings, and {debug.exceptions_count[Debug.Level.ERROR]} errors.')
 
-        song_dir = f'out/{vox.get_metadata("ascii")}'
-        if not os.path.isdir(song_dir):
-            print(f'> Creating song directory "{song_dir}".')
-            os.mkdir(song_dir)
-
-        preview_basename = copy_preview(vox, song_dir)
-        if args.preview_only:
-            continue
-
-        fallback_jacket_diff_idx = None
-
-        using_difficulty_audio = False
-
-        if not args.no_media:
-            target_audio_path = song_dir + '/track.ogg'
-
-            src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
-
-            if vox.difficulty == Difficulty.INFINITE:
-                src_audio_path_diff = f'{splitx(src_audio_path)[0]}_4i{splitx(src_audio_path)[1]}'
-                if os.path.exists(src_audio_path_diff):
-                    print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
-                    src_audio_path = src_audio_path_diff
-                    target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
-                    using_difficulty_audio = True
-
-            if not os.path.exists(target_audio_path):
-                print(f'> Copying audio file {src_audio_path} to song directory.')
-                copyfile(src_audio_path, target_audio_path)
-            else:
-                print(f'> Audio file "{target_audio_path}" already exists.')
-
-            src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-            src_jacket_path = args.jacket_dir + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
-
-            if os.path.exists(src_jacket_path):
-                target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
-                print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
-                copyfile(src_jacket_path, target_jacket_path)
-            else:
-                print(f'> Could not find jacket image file. Checking easier diffs.')
-                fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
-                while True:
-                    if fallback_jacket_diff_idx < 0:
-                        print('> No jackets found for easier difficulties either. Leaving jacket blank.')
-                        fallback_jacket_diff_idx = ''
-                        break
-
-                    easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
-                    if os.path.exists(easier_jacket_path):
-                        # We found the diff number with the jacket.
-                        print(f'> Using jacket "{easier_jacket_path}".')
-                        break
-                    fallback_jacket_diff_idx -= 1
-
-        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
-
-        debug.output_filename = chart_path
-        debug.state = Debug.State.OUTPUT
-
-        print(f'> Writing KSH data to "{chart_path}".')
-        with open(chart_path, "w+", encoding='utf-8') as ksh_file:
-            try:
-                vox.write_to_ksh(file=ksh_file,
-                           jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
-                           track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
-                           preview_basename=preview_basename)
-            except Exception as e:
-                print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
-                continue
-            print(f'> Finished conversion with {debug.exceptions_count[Debug.Level.ABNORMALITY]} abnormalities, {debug.exceptions_count[Debug.Level.WARNING]} warnings, and {debug.exceptions_count[Debug.Level.ERROR]} errors.')
-
-    debug.close()
-    exit(0)
-
-print('Please specify something to do.')
-exit(1)
+debug.close()
+exit(0)

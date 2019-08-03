@@ -1,9 +1,7 @@
 from enum import Enum, auto
-from collections import namedtuple
 from recordclass import dataobject
 from xml.etree import ElementTree
 from shutil import copyfile
-from functools import lru_cache as cache
 import traceback
 import random
 import math
@@ -14,6 +12,7 @@ import argparse
 from os.path import splitext as splitx
 from os.path import join as pjoin
 
+# Ticks per a beat of /4 time
 TICKS_PER_BEAT = 48
 
 SLAM_TICKS = 4
@@ -71,8 +70,6 @@ def truncate(x, digits) -> float:
     stepper = 10.0 ** digits
     return math.trunc(stepper * x) / stepper
 
-TimeSignature = namedtuple('TimeSignature', 'top bottom')
-
 class VoxLoadError(Exception):
     pass
 
@@ -87,29 +84,39 @@ class VoxParseError(Exception):
 class KshConvertError(Exception):
     pass
 
+class TimeSignature:
+    def __init__(self, top, bottom):
+        self.top: int = top
+        self.bottom: int = bottom
+
+    def ticks_per_beat(self):
+        return int(TICKS_PER_BEAT * (4 / self.bottom))
+
 class Timing:
+    # TODO Take timesig as a param
     def __init__(self, measure, beat, offset):
-        self.measure = measure
-        self.beat = beat
-        self.offset = offset
+        self.measure: int = measure
+        self.beat: int = beat
+        self.offset: int = offset
 
     @classmethod
     def from_time_str(cls, time: str):
         """ Create a Timing from the format string that appears in the first column of vox tracks. """
         splitted = time.split(',')
+        # TODO Use current time signature
         if int(splitted[2]) >= TICKS_PER_BEAT:
             raise ValueError(f'offset of {int(splitted[2])} is greater than maximum')
         return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
 
     def diff(self, other, timesig):
-        ticks_per_beat = int(float(TICKS_PER_BEAT) * (4 / timesig.bottom))
-        return (self.measure - other.measure) * (ticks_per_beat * timesig.top) + (self.beat - other.beat) * ticks_per_beat + (self.offset - other.offset)
+        return (self.measure - other.measure) * (timesig.ticks_per_beat() * timesig.top) \
+               + (self.beat - other.beat) * timesig.ticks_per_beat() \
+               + (self.offset - other.offset)
 
     def add(self, ticks, timesig):
-        ticks_per_beat = int(float(TICKS_PER_BEAT) * (4 / timesig.bottom))
         new = Timing(self.measure, self.beat, self.offset + ticks)
-        while new.offset >= ticks_per_beat:
-            new.offset -= ticks_per_beat
+        while new.offset >= timesig.ticks_per_beat():
+            new.offset -= timesig.ticks_per_beat()
             new.beat += 1
         while new.beat > timesig.top:
             new.beat -= timesig.top
@@ -126,19 +133,21 @@ class Timing:
         return '{},{},{}'.format(self.measure, self.beat, self.offset)
 
     def __cmp__(self, other):
+        # TODO There has to be a better way to express this
         if self.measure == other.measure:
             if self.beat == other.beat:
                 return self.offset - other.offset
             return self.beat - other.beat
         return self.measure - other.measure
 
-class CameraNode:
-    def __init__(self, start_param, end_param, duration):
-        self.start_param = start_param
-        self.end_param = end_param
-        self.duration = duration
+class CameraNode(dataobject):
+    start_param: float
+    end_param: float
+    duration: int
 
-class CameraParam(Enum):
+# TODO Use mapped_enum
+class SpcParam(Enum):
+    """ SPCONTROLLER section param. """
     @classmethod
     def from_vox_name(cls, vox_name):
         if vox_name == 'CAM_RotX':
@@ -166,7 +175,7 @@ class CameraParam(Enum):
         else:
             return None
 
-    def to_ksh_value(self, val=0):
+    def to_ksh_value(self, val:float=0):
         # Convert the vox value to the one that will be printed to the ksh.
         if self == self.ROT_X:
             return int(val * 150.0)
@@ -183,17 +192,18 @@ class CameraParam(Enum):
     AIRR_SCAX = auto()
     TILT = auto()
 
-def spcontroller_line_is_normal(param, splitted):
-    cell = lambda i: splitted[i].strip()
-    if param == CameraParam.REALIZE:
-        if cell(2) == '3':
-            return cell(4) == '36.12' and cell(5) == '60.12' and cell(6) == '110.12' and cell(7) == '0.00'
-        elif cell(2) == '4':
-            return cell(4) == '0.62' and cell(5) == '0.72' and cell(6) == '1.03' and cell(7) == '0.00'
-    return True
-    # TODO Other params maybe
+    @classmethod
+    def line_is_abnormal(cls, param, splitted):
+        cell = lambda i: splitted[i].strip()
+        if param == SpcParam.REALIZE:
+            if cell(2) == '3':
+                return cell(4) != '36.12' or cell(5) != '60.12' or cell(6) != '110.12' or cell(7) != '0.00'
+            elif cell(2) == '4':
+                return cell(4) != '0.62' or cell(5) != '0.72' or cell(6) != '1.03' or cell(7) != '0.00'
+        return False
+        # TODO Other params maybe
 
-class KshootFilter(Enum):
+class KshFilter(Enum):
     @classmethod
     def from_vox_filter_id(cls, filter_id):
         if filter_id == 0:
@@ -221,6 +231,7 @@ class KshootFilter(Enum):
     HIGHPASS = auto()
     BITCRUSH = auto()
 
+# TODO Implement
 class FxChipSound(Enum):
     @classmethod
     def from_vox(cls, sound_id):
@@ -237,25 +248,10 @@ class FxChipSound(Enum):
     CLAP = auto()
     SNARE = auto()
 
-class KshootEffect(Enum):
-    @classmethod
-    @cache(maxsize=None)
-    def _name(cls):
-        return RevMap({
-            cls.RETRIGGER: 'Retrigger',
-            cls.GATE: 'Gate',
-            cls.FLANGER: 'Flanger',
-            cls.PHASER: 'Phaser',
-            cls.TAPESTOP: 'TapeStop',
-            cls.SIDECHAIN: 'SideChain',
-            cls.WOBBLE: 'Wobble',
-            cls.BITCRUSHER: 'BitCrusher',
-            cls.ECHO: 'Echo',
-            cls.PITCHSHIFT: 'PitchShift'
-        })
-
+# TODO Use mapped_enum
+class KshEffect(Enum):
     def to_ksh_simple_name(self):
-        return self._name().get(self)
+        return self.value
 
     @classmethod
     def choose_random(cls):
@@ -264,16 +260,16 @@ class KshootEffect(Enum):
             return cls.choose_random()
         return choice
 
-    RETRIGGER = auto()
-    GATE = auto()
-    FLANGER = auto()
-    BITCRUSHER = auto()
-    PHASER = auto()
-    WOBBLE = auto()
-    PITCHSHIFT = auto()
-    TAPESTOP = auto()
-    ECHO = auto()
-    SIDECHAIN = auto()
+    RETRIGGER = 'Retrigger'
+    GATE = 'Gate'
+    FLANGER = 'Flanger'
+    BITCRUSHER = 'BitCrusher'
+    PHASER = 'Phaser'
+    WOBBLE = 'Wobble'
+    PITCHSHIFT = 'PitchShift'
+    TAPESTOP = 'TapeStop'
+    ECHO = 'Echo'
+    SIDECHAIN = 'SideChain'
 
 class KshEffectDefine:
     def __init__(self):
@@ -297,25 +293,25 @@ class KshEffectDefine:
         define = cls.default_effect()
 
         if sound_id == 2:
-            define.effect = KshootEffect.RETRIGGER
+            define.effect = KshEffect.RETRIGGER
             define.main_param = '8'
         elif sound_id == 3:
-            define.effect = KshootEffect.RETRIGGER
+            define.effect = KshEffect.RETRIGGER
             define.main_param = '16'
         elif sound_id == 4:
-            define.effect = KshootEffect.GATE
+            define.effect = KshEffect.GATE
             define.main_param = '16'
         elif sound_id == 5:
-            define.effect = KshootEffect.FLANGER # TODO Tweak
+            define.effect = KshEffect.FLANGER # TODO Tweak
             define.main_param = '200' # TODO Screw you USC (by default, flangers have no effect)
         elif sound_id == 6:
-            define.effect = KshootEffect.RETRIGGER
+            define.effect = KshEffect.RETRIGGER
             define.main_param = '32'
         elif sound_id == 7:
-            define.effect = KshootEffect.GATE
+            define.effect = KshEffect.GATE
             define.main_param = '8'
         elif sound_id == 8:
-            define.effect = KshootEffect.PITCHSHIFT
+            define.effect = KshEffect.PITCHSHIFT
             define.main_param = '8' # TODO Tweak
         elif sound_id > 8:
             raise ValueError(f'old vox sound id {sound_id} does not exist')
@@ -325,7 +321,7 @@ class KshEffectDefine:
     @classmethod
     def default_effect(cls):
         define = KshEffectDefine()
-        define.effect = KshootEffect.FLANGER
+        define.effect = KshEffect.FLANGER
         return define
 
     @classmethod
@@ -333,12 +329,12 @@ class KshEffectDefine:
         splitted = line.replace('\t', '').split(',')
 
         define = KshEffectDefine()
-        define.effect = KshootEffect.FLANGER
+        define.effect = KshEffect.FLANGER
 
         if splitted[0] == '1' or splitted[0] == '8':
             # TODO No way this is right
             # Retrigger / echo (they're pretty much the same thing)
-            define.effect = KshootEffect.RETRIGGER
+            define.effect = KshEffect.RETRIGGER
 
             if float(splitted[3]) < 0:
                 define.main_param = int(float(splitted[1]) * 16)
@@ -354,7 +350,7 @@ class KshEffectDefine:
             define.params['mix'] = f'0%>{int(float(splitted[2]))}%'
 
             if feedback_level != '100%':
-                define.effect = KshootEffect.ECHO
+                define.effect = KshEffect.ECHO
                 define.params['feedbackLevel'] = feedback_level
                 if splitted[0] == '8':
                     define.params['updatePeriod'] = 0
@@ -371,7 +367,7 @@ class KshEffectDefine:
         elif splitted[0] == '2':
             # This is probably correct
             # Gate
-            define.effect = KshootEffect.GATE
+            define.effect = KshEffect.GATE
             define.main_param = int((2 / float(splitted[3])) * float(splitted[2]))
             define.params['waveLength'] = f'1/{define.main_param}'
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
@@ -379,7 +375,7 @@ class KshEffectDefine:
         elif splitted[0] == '3':
             # TODO Figure this out
             # Phaser (more like chorus)
-            define.effect = KshootEffect.PHASER
+            define.effect = KshEffect.PHASER
             define.params['stereoWidth'] = f'{int(float(splitted[4]))}%'
 
             define.params['Q'] = str(float(splitted[3]))
@@ -389,7 +385,7 @@ class KshEffectDefine:
         elif splitted[0] == '4':
             # TODO This needs some tweaking
             # Tape stop
-            define.effect = KshootEffect.TAPESTOP
+            define.effect = KshEffect.TAPESTOP
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
             speed = float(splitted[3]) * float(splitted[2]) * 9.8125
             if speed > 50:
@@ -402,13 +398,13 @@ class KshEffectDefine:
         elif splitted[0] == '5':
             # TODO Investigate if this is right
             # Sidechain
-            define.effect = KshootEffect.SIDECHAIN
+            define.effect = KshEffect.SIDECHAIN
             define.main_param = int(float(splitted[2]) * 2)
             define.params['period'] = f'1/{define.main_param}'
 
         elif splitted[0] == '6':
             # Wobble
-            define.effect = KshootEffect.WOBBLE
+            define.effect = KshEffect.WOBBLE
             define.main_param = int(float(splitted[6])) * 4
             define.params['waveLength'] = f'1/{define.main_param}'
             define.params['loFreq'] = f'{int(float(splitted[4]))}Hz'
@@ -418,20 +414,20 @@ class KshEffectDefine:
 
         elif splitted[0] == '7':
             # Bitcrusher
-            define.effect = KshootEffect.BITCRUSHER
+            define.effect = KshEffect.BITCRUSHER
             define.main_param = int(splitted[2])
             define.params['reduction'] = f'{define.main_param}samples'
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
 
         elif splitted[0] == '9':
             # Pitchshift
-            define.effect = KshootEffect.PITCHSHIFT
+            define.effect = KshEffect.PITCHSHIFT
             define.main_param = int(float(splitted[2]))
             define.params['pitch'] = define.main_param
             define.params['mix'] = f'0%>{int(float(splitted[1]))}'
 
         elif splitted[0] == '11':
-            define.effect = KshootEffect.WOBBLE
+            define.effect = KshEffect.WOBBLE
             define.main_param = 1
             define.params['loFreq'] = f'{int(float(splitted[3]))}Hz'
             define.params['hiFreq'] = define.params["loFreq"]
@@ -440,7 +436,7 @@ class KshEffectDefine:
         elif splitted[0] == '12':
             # High pass effect
             # TODO This is not right at all and is a placeholder
-            define.effect = KshootEffect.FLANGER
+            define.effect = KshEffect.FLANGER
             define.params['depth'] = '200samples'
             define.params['volume'] = '100%'
             define.params['mix'] = f'0%>100%'
@@ -474,66 +470,40 @@ class TabParamAssignInfo:
         return not line.endswith('0,	0.00,	0.00')
 
 class Button(Enum):
-    BT_A = auto()
-    BT_B = auto()
-    BT_C = auto()
-    BT_D = auto()
-    FX_L = auto()
-    FX_R = auto()
-
     def is_fx(self):
         return self == Button.FX_L or self == Button.FX_R
 
     @classmethod
     def from_track_num(cls, num: int):
-        if num == 2:
-            return cls.FX_L
-        elif num == 3:
-            return cls.BT_A
-        elif num == 4:
-            return cls.BT_B
-        elif num == 5:
-            return cls.BT_C
-        elif num == 6:
-            return cls.BT_D
-        elif num == 7:
-            return cls.FX_R
-        elif num == 9:
-            return None
-        else:
-            raise ValueError(f'invalid track number for button: {num}')
+        try:
+            return next(x for x in cls if x.value == num)
+        except StopIteration as err:
+            raise ValueError(f'invalid track number for button: {num}') from err
 
     def to_track_num(self):
-        if self == self.FX_L:
-            return 2
-        elif self == self.FX_R:
-            return 7
-        elif self == self.BT_A:
-            return 3
-        elif self == self.BT_B:
-            return 4
-        elif self == self.BT_C:
-            return 5
-        elif self == self.BT_D:
-            return 6
+        return self.value
 
-class ButtonPress:
-    def __init__(self, button: Button, duration: int, effect):
-        self.button = button
-        self.duration = duration
-        self.effect = effect
+    BT_A = 3
+    BT_B = 4
+    BT_C = 5
+    BT_D = 6
+    FX_L = 2
+    FX_R = 7
 
-LaserRangeChange = namedtuple('LaserRangeChange', 'time side range')
+class ButtonPress(dataobject):
+    button: Button
+    duration: int
+    effect: int
 
 class LaserSide(Enum):
-    LEFT = auto()
-    RIGHT = auto()
+    LEFT = 'l', 1
+    RIGHT = 'r', 8
 
     def to_letter(self):
-        return 'l' if self == LaserSide.LEFT else 'r'
+        return self.value[0]
 
     def to_track_num(self):
-        return 1 if self == self.LEFT else 8
+        return self.value[1]
 
 class LaserCont(Enum):
     """ The continuity status of a laser node. """
@@ -547,22 +517,24 @@ class LaserNode:
         position: int = None
         node_type: LaserCont = None
         range: int = 1
-        filter: KshootFilter = KshootFilter.PEAK
+        filter: KshFilter = KshFilter.PEAK
+        # TODO This is wrong (spins don't have a division I think).
         spin_division: int = 0
 
     def __init__(self, builder: Builder):
-        self.side = builder.side
-        self.position = builder.position
-        self.node_type = builder.node_type
-        self.range = builder.range
-        self.filter = builder.filter
-        self.spin_division = builder.spin_division
+        self.side: LaserSide = builder.side
+        self.position: int = builder.position
+        self.node_cont: LaserCont = builder.node_type
+        self.range: int = builder.range
+        self.filter: KshFilter = builder.filter
+        self.spin_division: int = builder.spin_division
 
         if self.position < 0 or self.position > 127:
             raise ValueError(f'position {self.position} is out of bounds')
 
     def position_ksh(self):
         """ Convert the position from the 7-bit scale to whatever the hell KSM is using. """
+        # TODO This is wrong occassionally (try lowermost revolt 16)
         chars = []
         for char in range(10):
             chars.append(chr(ord('0') + char))
@@ -579,8 +551,8 @@ class LaserSlam:
         RIGHT = auto()
 
     def __init__(self, start: LaserNode, end: LaserNode):
-        self.start = start
-        self.end = end
+        self.start: LaserNode = start
+        self.end: LaserNode = end
 
         if self.start.position == self.end.position:
             raise ValueError('attempt to create a slam with the same start and end')
@@ -597,78 +569,35 @@ class LaserSlam:
         return self.start.side
 
 class Difficulty(Enum):
-    NOVICE = 0
-    ADVANCED = 1
-    EXHAUST = 2
-    MAXIMUM = 3
-    INFINITE = 4
-    # TODO GRV and HVN?
-
-    @classmethod
-    @cache(maxsize=None)
-    def _letter(cls):
-        return RevMap({
-            cls.NOVICE: 'n',
-            cls.ADVANCED: 'a',
-            cls.EXHAUST: 'e',
-            cls.MAXIMUM: 'm',
-            cls.INFINITE: 'i'
-        })
+    NOVICE = 0, 'n', 'novice'
+    ADVANCED = 1, 'a', 'challenge'
+    EXHAUST = 2, 'e', 'extended'
+    INFINITE = 3, 'i', 'infinite'
+    MAXIMUM = 4, 'm', 'infinite'
 
     @classmethod
     def from_letter(cls, k):
-        return cls._letter().rev(k)
+        return next(x for x in cls if x.value[1] == k)
 
     def to_letter(self):
-        return self._letter().get(self)
+        return self.value[1]
 
     @classmethod
     def from_number(cls, num):
-        if num == 1:
-            return cls.NOVICE
-        elif num == 2:
-            return cls.ADVANCED
-        elif num == 3:
-            return cls.EXHAUST
-        elif num == 4:
-            return cls.INFINITE
-        elif num == 5:
-            return cls.MAXIMUM
+        try:
+            return next(x for x in cls if x.value[0] == num)
+        except StopIteration:
+            # TODO Error handling.
+            return None
 
     def to_ksh_name(self):
-        """ Convert to a name recognized by KSM. """
-        if self == self.NOVICE:
-            return 'novice'
-        elif self == self.ADVANCED:
-            return 'challenge'
-        elif self == self.EXHAUST:
-            return 'extended'
-        elif self == self.MAXIMUM or self == self.INFINITE:
-            return 'infinite'
+        return self.value[2]
 
     def to_xml_name(self):
-        if self == self.NOVICE:
-            return 'novice'
-        elif self == self.ADVANCED:
-            return 'advanced'
-        elif self == self.EXHAUST:
-            return 'exhaust'
-        elif self == self.MAXIMUM:
-            return 'maximum'
-        elif self == self.INFINITE:
-            return 'infinite'
+        return self.name.lower()
 
     def to_jacket_ifs_numer(self):
-        if self == self.NOVICE:
-            return 1
-        elif self == self.ADVANCED:
-            return 2
-        elif self == self.EXHAUST:
-            return 3
-        elif self == self.INFINITE:
-            return 4
-        else:
-            return 5
+        return self.value[0] + 1
 
 class TiltMode(Enum):
     # TODO Tweak -- is biggest correct?
@@ -703,6 +632,7 @@ class EventKind(Enum):
     SPCONTROLLER = auto()
 
 class KshLineBuf:
+    """ Represents a single line of notes in KSH (along with effect assignment lines) """
     class ButtonState(Enum):
         NONE = auto()
         PRESS = auto()
@@ -752,7 +682,6 @@ class KshLineBuf:
         buf += self.spin
 
         return buf
-
 
 class Vox:
     class State(Enum):
@@ -1003,14 +932,14 @@ class Vox:
 
         elif self.state == self.State.SPCONTROLLER:
             try:
-                param = CameraParam.from_vox_name(splitted[1])
+                param = SpcParam.from_vox_name(splitted[1])
             except ValueError:
                 debug.record_last_exception(tag='spcontroller_load')
                 return
 
             if param is not None:
                 self.events[now][(EventKind.SPCONTROLLER, param)] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
-            if not spcontroller_line_is_normal(param, splitted):
+            if SpcParam.line_is_abnormal(param, splitted):
                 debug.record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
 
         elif self.state == self.state.TRACK:
@@ -1023,7 +952,7 @@ class Vox:
 
                 if len(splitted) > 4:
                     try:
-                        laser_node.filter = KshootFilter.from_vox_filter_id(int(splitted[4]))
+                        laser_node.filter = KshFilter.from_vox_filter_id(int(splitted[4]))
                     except ValueError:
                         debug.record_last_exception(tag='laser_load')
 
@@ -1070,7 +999,7 @@ class Vox:
                 self.events[now][(EventKind.TRACK, self.state_track)]= ButtonPress(button, int(splitted[1]), fx_data)
 
 
-    def write_to_ksh(self, file=sys.stdout, metadata_only=False, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
+    def write_to_ksh(self, file=sys.stdout, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
         # First print metadata.
         if jacket_idx is None:
             jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
@@ -1081,7 +1010,8 @@ class Vox:
         if preview_basename is None:
             preview_basename = f'preview{AUDIO_EXTENSION}'
 
-        print(f'''title={self.get_metadata('title_name')}
+        print(f'''// NekoConvert: {self.game_id} {self.song_id} {self.get_metadata("ascii")}
+title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
 jacket={jacket_idx}.png
@@ -1091,6 +1021,7 @@ level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
 m={track_basename}
 mvol={self.get_metadata('volume')}
+// Requires a patched USC to work.
 previewfile={preview_basename}
 o=0
 bg=desert
@@ -1103,21 +1034,26 @@ chokkakuautovol=0
 chokkakuvol=50
 ver=167''', file=file)
 
-        if metadata_only:
-            return
-
         print('--', file=file)
 
         class SpControllerCountdown(dataobject):
             event: CameraNode
             time_left: int
 
+        # Below begins the main printing loop.
+        # We iterate through each tick of the song and print a KSH line. If there are events, we put stuff on that line.
+
+        # The currently active BT holds.
         holds = {}
-        lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
+
+        # The currently active SpController nodes.
+        ongoing_spcontroller_events = {p: None for p in SpcParam}
+
+        # Whether there is an ongoing laser on either side.
+        lasers = {s: None for s in LaserSide}
         slam_status = {}
-        last_laser_timing = {side: None for side in LaserSide}
-        ongoing_spcontroller_events = {x: None for x in CameraParam}
-        last_filter = KshootFilter.PEAK
+        last_laser_timing = {s: None for s in LaserSide}
+        last_filter = KshFilter.PEAK
         current_timesig = self.events[Timing(1, 1, 0)][EventKind.TIMESIG]
         line_num = 0
 
@@ -1164,7 +1100,7 @@ ver=167''', file=file)
 
                             elif type(kind) is tuple and kind[0] == EventKind.SPCONTROLLER:
                                 event: CameraNode
-                                cam_param: CameraParam = kind[1]
+                                cam_param: SpcParam = kind[1]
                                 if cam_param.to_ksh_value() is not None:
                                     if ongoing_spcontroller_events[cam_param] is not None and ongoing_spcontroller_events[cam_param].time_left != 0:
                                         raise KshConvertError(f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
@@ -1242,9 +1178,9 @@ ver=167''', file=file)
                                         last_filter = event.filter
 
                                     if not skip_laser:
-                                        if event.node_type == LaserCont.START:
+                                        if event.node_cont == LaserCont.START:
                                             lasers[event.side] = True
-                                        elif event.node_type == LaserCont.END:
+                                        elif event.node_cont == LaserCont.END:
                                             lasers[event.side] = False
                                         buffer.lasers[event.side] = event.position_ksh()
 
@@ -1257,6 +1193,7 @@ ver=167''', file=file)
                                         if event.button.is_fx():
                                             letter = 'l' if event.button == Button.FX_L else 'r'
                                             try:
+                                                event.effect: KshEffect
                                                 effect_string = f'{self.effect_defines[event.effect].fx_change(event.effect)}' if type(event.effect) is int else \
                                                     event.effect[0].to_ksh_name(event.effect[1])
                                             except KeyError:
@@ -1295,7 +1232,7 @@ ver=167''', file=file)
                         if slam_status[slam] == 0:
                             buffer.lasers[slam.side()] = slam.end.position_ksh()
                             del slam_status[slam]
-                            if slam.end.node_type == LaserCont.END:
+                            if slam.end.node_cont == LaserCont.END:
                                 lasers[slam.side()] = False
                         else:
                             if slam_status[slam] < SLAM_TICKS:
@@ -1542,9 +1479,9 @@ def main():
         with open(chart_path, "w+", encoding='utf-8') as ksh_file:
             try:
                 vox.write_to_ksh(file=ksh_file,
-                           jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
-                           track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
-                           preview_basename=preview_basename)
+                                 jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
+                                 track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
+                                 preview_basename=preview_basename)
             except Exception as e:
                 print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
                 debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)

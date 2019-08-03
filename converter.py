@@ -1100,6 +1100,7 @@ ver=167''', file=file)
         holds = {}
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slam_status = {}
+        last_laser_timing = None
         ongoing_spcontroller_events = {x: None for x in CameraParam}
         last_filter = KshootFilter.PEAK
         current_timesig = self.events[Timing(1, 1, 0)][EventKind.TIMESIG]
@@ -1208,13 +1209,14 @@ ver=167''', file=file)
                                     event: ButtonPress
                                     if event.duration != 0:
                                         if event.button.is_fx():
+                                            letter = 'l' if event.button == Button.FX_L else 'r'
                                             try:
-                                                letter = 'l' if event.button == Button.FX_L else 'r'
                                                 effect_string = f'{self.effect_defines[event.effect].fx_change(event.effect)}' if type(event.effect) is int else \
                                                     event.effect[0].to_ksh_name(event.effect[1])
-                                                buffer.meta.append(f'fx-{letter}={effect_string}')
                                             except KeyError:
                                                 debug.record_last_exception(tag='button_fx')
+                                                effect_string = f'{self.effect_defines[0].fx_change(0)}'
+                                            buffer.meta.append(f'fx-{letter}={effect_string}')
                                         buffer.buttons[event.button] = KshLineBuf.ButtonState.HOLD
                                         holds[event.button] = event.duration
                                     else:

@@ -4,3 +4,4 @@ data/
 *.ksh
 out/
 exceptions.txt
+issues.txt

@@ -1309,6 +1309,9 @@ ver=167''', file=file)
         for k, v in self.effect_defines.items():
             print(v.to_define_line(k), file=file)
 
+    def close(self):
+        self.voxfile.close()
+
 
 METADATA_FIX = [
     ['\u203E', '~'],
@@ -1543,6 +1546,7 @@ def main():
                 debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
                 continue
             print(f'> Finished conversion with {debug.exceptions_count[Debug.Level.ABNORMALITY]} abnormalities, {debug.exceptions_count[Debug.Level.WARNING]} warnings, and {debug.exceptions_count[Debug.Level.ERROR]} errors.')
+        vox.close()
 
     debug.close()
     exit(0)

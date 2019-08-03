@@ -101,6 +101,21 @@ class Timing:
             raise ValueError(f'offset of {int(splitted[2])} is greater than maximum')
         return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
 
+    def diff(self, other, timesig):
+        ticks_per_beat = int(float(TICKS_PER_BEAT) * (4 / timesig.bottom))
+        return (self.measure - other.measure) * (ticks_per_beat * timesig.top) + (self.beat - other.beat) * ticks_per_beat + (self.offset - other.offset)
+
+    def add(self, ticks, timesig):
+        ticks_per_beat = int(float(TICKS_PER_BEAT) * (4 / timesig.bottom))
+        new = Timing(self.measure, self.beat, self.offset + ticks)
+        while new.offset >= ticks_per_beat:
+            new.offset -= ticks_per_beat
+            new.beat += 1
+        while new.beat > timesig.top:
+            new.beat -= timesig.top
+            new.measure += 1
+        return new
+
     def __eq__(self, other):
         return self.measure == other.measure and self.beat == other.beat and self.offset == other.offset
 
@@ -1100,7 +1115,7 @@ ver=167''', file=file)
         holds = {}
         lasers = {LaserSide.LEFT: False, LaserSide.RIGHT: False}
         slam_status = {}
-        last_laser_timing = None
+        last_laser_timing = {side: None for side in LaserSide}
         ongoing_spcontroller_events = {x: None for x in CameraParam}
         last_filter = KshootFilter.PEAK
         current_timesig = self.events[Timing(1, 1, 0)][EventKind.TIMESIG]
@@ -1190,6 +1205,34 @@ ver=167''', file=file)
 
                                     event: LaserNode
 
+                                    # KSH defines anything less than a 32th to be a slam, but some vox files
+                                    # have nodes less than a 32th apart from each other. To counter this, we
+                                    # just push laser nodes a tick forward until they're more than a 32th
+                                    # apart.
+                                    skip_laser = False
+                                    thirtysecondth_ticks = int((4 * int(float(TICKS_PER_BEAT) * (4.0 / current_timesig.bottom))) / 32)
+                                    if last_laser_timing[event.side] is not None and now.diff(last_laser_timing[event.side], current_timesig) == thirtysecondth_ticks:
+                                        # Push it a tick forward to avoid being interpreted as a slam.
+                                        if now.add(1, current_timesig) not in self.events:
+                                            self.events[now.add(1, current_timesig)] = {}
+                                        self.events[Timing(now.measure, now.beat, now.offset + 1)][kind] = event
+                                        skip_laser = True
+
+                                        # Look ahead and push other nodes forward.
+                                        no_more_pushes = False
+                                        while not no_more_pushes:
+                                            no_more_pushes = True
+                                            for i in range(6, 1, -1):
+                                                lookahead_timing = now.add(1, current_timesig).add(i, current_timesig)
+                                                if lookahead_timing in self.events and kind in self.events[lookahead_timing]:
+                                                    ev = self.events[lookahead_timing][kind]
+                                                    timing_plus_one = lookahead_timing.add(1, current_timesig)
+                                                    if timing_plus_one not in self.events:
+                                                        self.events[timing_plus_one] = {}
+                                                    self.events[Timing(lookahead_timing.measure, lookahead_timing.beat, lookahead_timing.offset + 1)][kind] = ev
+                                                    del self.events[lookahead_timing][kind]
+                                                    no_more_pushes = False
+
                                     if event.range != laser_range[event.side]:
                                         buffer.meta.append(f'laserrange_{event.side.to_letter()}={event.range}x')
                                         laser_range[event.side] = event.range
@@ -1198,11 +1241,14 @@ ver=167''', file=file)
                                         buffer.meta.append(f'filtertype={event.filter.to_ksh_name()}')
                                         last_filter = event.filter
 
-                                    if event.node_type == LaserCont.START:
-                                        lasers[event.side] = True
-                                    elif event.node_type == LaserCont.END:
-                                        lasers[event.side] = False
-                                    buffer.lasers[event.side] = event.position_ksh()
+                                    if not skip_laser:
+                                        if event.node_type == LaserCont.START:
+                                            lasers[event.side] = True
+                                        elif event.node_type == LaserCont.END:
+                                            lasers[event.side] = False
+                                        buffer.lasers[event.side] = event.position_ksh()
+
+                                    last_laser_timing[event.side] = now
 
                                 else:
                                     # Button
@@ -1311,6 +1357,7 @@ CASES = {
     'old-vox-retrigger-fix': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_3e.vox'
 }
 
+# TODO Split up the copy process into functions like this.
 def copy_preview(vox, song_dir):
     output_path = f'{song_dir}/preview{AUDIO_EXTENSION}'
     preview_path = f'{args.preview_dir}/{vox.song_id}{AUDIO_EXTENSION}'

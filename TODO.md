@@ -3,8 +3,14 @@
 - [x] FX hold effects (version >= 4)
 - [x] Metadata
 - [x] Preview *(requires patched USC)*
-- [x] Camera *(still needs tweaking?)*
-- [ ] Tilt effect
-- [ ] VOL effect configuration
+- [x] Camera *(the specific multipliers might still need tweaking)*
+- [x] Tilt effect
 - [x] Out of bounds lasers
-- [ ] Tweak FX to match game
+- [ ] Figure out the rest of the FX and parameters
+- [ ] Figure out the rest of the laser filters and parameters
+- [ ] Slam sounds / volume parameters?
+- [ ] Calculate spin duration correctly
+- [ ] Implement other kinds of spins
+- [ ] Test unnatural time signatures more
+- [ ] Fix lasers appearing chopped up in places
+- [ ] FX chip hitsounds

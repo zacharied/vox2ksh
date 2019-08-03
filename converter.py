@@ -55,17 +55,6 @@ class Debug:
     def record_last_exception(self, level=Level.WARNING, tag='python_exception', trace=False):
         self.record(level, tag, traceback.format_exc() if trace else sys.exc_info()[1])
 
-class RevMap:
-    def __init__(self, mapping):
-        self.mapping = mapping
-        self._rev = {v: k for k, v in mapping.items()}
-
-    def get(self, k):
-        return self.mapping.get(k)
-
-    def rev(self, k):
-        return self._rev.get(k)
-
 def truncate(x, digits) -> float:
     stepper = 10.0 ** digits
     return math.trunc(stepper * x) / stepper

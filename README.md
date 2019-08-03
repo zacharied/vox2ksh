@@ -11,7 +11,7 @@ The paths of the chart files and associated data must match the following requir
 These should be in the format given by running [ifstools](https://github.com/mon/ifstools) on the game's vox IFS files.
 They should go inside the directory given by the `VOX_ROOT` constant. If done correctly, there will be a number of
 `vox_XX_ifs` directories where `XX` is the number from the IFS folder. Each directory will contain a number of `.vox` 
-files.
+files. Charts go in the `data` directory.
 
 #### Songs
 
@@ -30,6 +30,10 @@ in its own directory of the format `jk_<game id>_<song id>_<difficulty number>_b
 the _ifs>.png`. The game ID and song ID should be padded to 3 and 4 digits, respectively. So, the jacket for song with 
 ID 632 (which is from game 3) for difficulty **EXH** would be `jk_003_0632_3_b_ifs/text/jk_003_0632_3_b.png`.
 
+#### Metadata
+
+Place the `music_db.xml` in the `data` directory. It can be found in the same directory as the source IFS files.
+
 ## Usage
 
 Just running `converter.py` with Python 3 should begin converting the charts. The `--testcase` argument can be used to
@@ -38,6 +42,4 @@ to convert the song with the specified ID.
 
 ## Disclaimer
 
-This software is provided for educational purposes only. This software will only function correctly with legally and
-legitimately obtained copies of the required data. Sharing the output of this program is strictly prohibited and the
-outputted files will ONLY work on the machine on which the conversion was done.
+This software is provided for educational purposes only.

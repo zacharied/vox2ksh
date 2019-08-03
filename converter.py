@@ -1340,24 +1340,24 @@ METADATA_FIX = [
 ]
 
 CASES = {
-    'basic': 'data/vox_08_ifs/004_0781_alice_maestera_alstroemeria_records_5m.vox',
-    'laser-range': 'data/vox_12_ifs/004_1138_newleaf_blackyooh_3e.vox',
-    'time-signature': 'data/vox_01_ifs/001_0056_amanojaku_164_4i.vox',
-    'early-version': 'data/vox_01_ifs/001_0001_albida_muryoku_1n.vox',
-    'bpm': 'data/vox_03_ifs/002_0262_hanakagerou_minamotoya_1n.vox',
-    'encoding': 'data/vox_02_ifs/001_0121_eclair_au_chocolat_kamome_1n.vox',
-    'camera': 'data/vox_03_ifs/002_0250_crack_traxxxx_lite_show_magic_4i.vox',
-    'diff-preview': 'data/vox_01_ifs/001_0026_gorilla_pinocchio_4i.vox',
-    'slam-range': 'data/vox_06_ifs/003_0529_fks_nizikawa_3e.vox',
-    'new-fx': 'data/vox_01_ifs/001_0001_albida_muryoku_4i.vox',
-    'bug-fx': 'data/vox_13_ifs/004_1208_coldapse_aoi_3e.vox',
-    'double-fx': 'data/vox_12_ifs/004_1136_freedomdive_xi_2a.vox',
-    'fx': 'data/vox_11_ifs/004_1014_crystalmissile_fuhringcatmark_5m.vox',
-    'tilt-mode': 'data/vox_01_ifs/001_0034_phychopas_yucha_4i.vox',
-    'wtf': 'data/vox_14_ifs/004_1361_feelsseasickness_kameria_5m.vox',
-    'manual-tilt': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_4i.vox',
-    'sixeight': 'data/vox_08_ifs/003_0744_ancientgarden_cororo_3e.vox',
-    'old-vox-retrigger-fix': 'data/vox_01_ifs/001_0071_freaky_freak_kamome_3e.vox'
+    'basic': (781, 'm'),
+    'laser-range': (1138, 'e'),
+    'slam-range': (529, 'e'),
+    'time-signature': (56, 'i'),
+    'time-six-eight': (744, 'e'),
+    'bpm': (262, 'n'),
+    'early-version': (1, 'n'),
+    'encoding': (121, 'n'),
+    'diff-preview': (26, 'i'),
+    'new-fx': (1, 'i'),
+    'crash-fx': (1208, 'e'),
+    'double-fx': (1136, 'a'),
+    'highpass-fx': (1014, 'm'),
+    'old-vox-retrigger-fx': (71, 'e'),
+    'camera': (250, 'i'),
+    'tilt-mode': (34, 'i'),
+    'spc-tilt': (71, 'i'),
+    'wtf': (1361, 'm'),
 }
 
 # TODO Split up the copy process into functions like this.
@@ -1394,6 +1394,7 @@ def main():
     argparser = argparse.ArgumentParser(description='Convert vox to ksh')
     argparser.add_argument('-t', '--testcase')
     argparser.add_argument('-i', '--song-id')
+    argparser.add_argument('-d', '--song-difficulty')
     argparser.add_argument('-m', '--metadata-only', action='store_true')
     argparser.add_argument('-p', '--preview-only', action='store_true')
     argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
@@ -1435,10 +1436,13 @@ def main():
 
     for dirpath, dirnames, filenames in os.walk(VOX_ROOT):
         for filename in filenames:
+            import re
+            fullpath = pjoin(dirpath, filename)
             if (args.song_id is None and args.testcase is None) or \
-                    (args.song_id is not None and f'_{args.song_id}_' in filename) or \
-                    (args.testcase is not None and pjoin(dirpath, filename).replace('\\', '/') == CASES[args.testcase]):
-                candidates.append(pjoin(dirpath, filename))
+                    (args.song_id is not None and f'_{args.song_id.zfill(4)}_' in filename) or \
+                    (args.testcase is not None and re.match(rf'^.*00[1-4]_0*{CASES[args.testcase][0]}_.*{CASES[args.testcase][1]}\.vox$', fullpath)):
+                if args.song_difficulty is None or splitx(filename)[0][-1] == args.song_difficulty:
+                    candidates.append(pjoin(dirpath, filename))
 
     print('The following files will be processed:')
     for f in candidates:

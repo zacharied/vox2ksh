@@ -365,11 +365,11 @@ class KshEffectDefine:
             # TODO Figure this out
             # Phaser (more like chorus)
             define.effect = KshEffect.PHASER
+            define.main_param = '1'
             define.params['stereoWidth'] = f'{int(float(splitted[4]))}%'
-
             define.params['Q'] = str(float(splitted[3]))
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
-            define.params['period'] = '1'
+            define.params['period'] = define.main_param
 
         elif splitted[0] == '4':
             # TODO This needs some tweaking

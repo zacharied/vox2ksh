@@ -1192,7 +1192,7 @@ ver=167''', file=file)
                                                     del self.events[lookahead_timing][kind]
                                                     no_more_pushes = False
 
-                                    if event.range != laser_range[event.side]:
+                                    if event.range != 1:
                                         buffer.meta.append(f'laserrange_{event.side.to_letter()}={event.range}x')
                                         laser_range[event.side] = event.range
 
@@ -1306,6 +1306,8 @@ METADATA_FIX = [
 CASES = {
     'basic': (781, 'm'),
     'laser-range': (1138, 'e'),
+    'laser-range-refreshing-fix': (980, 'e'),
+    'choppy-laser': (1332, 'a'),
     'slam-range': (529, 'e'),
     'time-signature': (56, 'i'),
     'time-six-eight': (744, 'e'),

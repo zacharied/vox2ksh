@@ -22,6 +22,7 @@ SLAM_TICKS = 4
 FX_CHIP_SOUND_COUNT = 14
 
 AUDIO_EXTENSION = '.ogg'
+FX_CHIP_SOUND_EXTENSION = '.wav'
 VOX_ROOT = 'data'
 
 class Debug:
@@ -1230,7 +1231,7 @@ ver=167''', file=file)
                                         event.effect: int
                                         if event.button.is_fx() and event.effect is not None:
                                             letter = 'l' if event.button == Button.FX_L else 'r'
-                                            buffer.meta.append(f'fx-{letter}_se={event.effect}{AUDIO_EXTENSION}')
+                                            buffer.meta.append(f'fx-{letter}_se={event.effect}{FX_CHIP_SOUND_EXTENSION}')
 
                     # Loop end stuff.
                     for cam_param in [x for x in ongoing_spcontroller_events.keys() if ongoing_spcontroller_events[x] is not None]:
@@ -1353,13 +1354,13 @@ def copy_preview(vox, song_dir):
 def do_copy_fx_chip_sounds(vox, out_dir):
     print(f'> Copying FX chip sounds {vox.required_chip_sounds}.')
     for sound in vox.required_chip_sounds:
-        src_path = f'{args.fx_chip_sound_dir}/{sound}{AUDIO_EXTENSION}'
-        target_path = f'{out_dir}/{sound}{AUDIO_EXTENSION}'
+        src_path = f'{args.fx_chip_sound_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
+        target_path = f'{out_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
         if os.path.exists(src_path):
             copyfile(src_path, target_path)
         else:
             debug.record(Debug.Level.ERROR, 'copy_fx_chip_sound', f'cannot find file for chip sound with id {sound}')
-            copyfile(f'{args.fx_chip_sound_dir}/0{AUDIO_EXTENSION}', target_path)
+            copyfile(f'{args.fx_chip_sound_dir}/0{FX_CHIP_SOUND_EXTENSION}', target_path)
 
 ##############
 # PROGRAM RUNTIME BEGINS BELOW

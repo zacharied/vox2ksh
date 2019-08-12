@@ -23,6 +23,12 @@ have any leading zeroes. So, the audio file for song with ID 25 would be `25.ogg
 
 Previews follow the same convention as the songs but in the directory specified by `--preview-dir`.
 
+#### FX Chip Sounds
+
+Place these files in the directory specified by the `--fx-chip-sound-dir` flag. They should be named in the same order 
+they came out of the IFS archive, which can be found in the same directory as the song audio. Their extension should be 
+the same as the rest of the audio files.
+
 #### Jackets
 
 Jackets currently still are in the format outputted by ifstools. Each jacket goes

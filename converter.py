@@ -1,4 +1,6 @@
 from enum import Enum, auto
+from typing import Union
+
 from recordclass import dataobject
 from xml.etree import ElementTree
 from shutil import copyfile
@@ -16,6 +18,8 @@ from os.path import join as pjoin
 TICKS_PER_BEAT = 48
 
 SLAM_TICKS = 4
+
+FX_CHIP_SOUND_COUNT = 14
 
 AUDIO_EXTENSION = '.ogg'
 VOX_ROOT = 'data'
@@ -219,23 +223,6 @@ class KshFilter(Enum):
     LOWPASS = auto()
     HIGHPASS = auto()
     BITCRUSH = auto()
-
-# TODO Implement
-class FxChipSound(Enum):
-    @classmethod
-    def from_vox(cls, sound_id):
-        if sound_id == 2:
-            return cls.CLAP
-        raise ValueError(f'unknown FX chip sound id {sound_id}')
-
-    def to_ksh(self):
-        if self == self.CLAP:
-            return 'clap'
-        elif self == self.SNARE:
-            return 'snare'
-
-    CLAP = auto()
-    SNARE = auto()
 
 # TODO Use mapped_enum
 class KshEffect(Enum):
@@ -749,6 +736,8 @@ class Vox:
 
         self.finalized = False
 
+        self.required_chip_sounds = set()
+
     def __str__(self):
         return f'{self.get_metadata("ascii")} {self.diff_token()}'
 
@@ -987,14 +976,26 @@ class Vox:
                     return
 
                 fx_data = None
+                duration = int(splitted[1])
                 if button.is_fx():
                     # Process effect assignment.
-                    if self.vox_version < 4:
-                        fx_data = int(splitted[3]) if splitted[3].isdigit() else int(self.vox_defines[splitted[3]])
+                    if duration > 0:
+                        # Fx hold.
+                        if self.vox_version < 4:
+                            fx_data = int(splitted[3]) if splitted[3].isdigit() else int(self.vox_defines[splitted[3]])
+                        else:
+                            fx_data = int(splitted[2]) - 2
                     else:
-                        fx_data = int(splitted[2]) - 2
+                        # Fx chip, check for sound.
+                        if self.vox_version >= 4:
+                            sound_id = int(splitted[2])
+                            if sound_id != -1 and sound_id != 255 and (sound_id >= FX_CHIP_SOUND_COUNT or sound_id < 0):
+                                debug.record(Debug.Level.WARNING, 'chip_sound_parse', f'unhandled chip sound id {sound_id}')
+                            elif sound_id != 0:
+                                fx_data = sound_id
+                                self.required_chip_sounds.add(sound_id)
 
-                self.events[now][(EventKind.TRACK, self.state_track)]= ButtonPress(button, int(splitted[1]), fx_data)
+                self.events[now][(EventKind.TRACK, self.state_track)] = ButtonPress(button, int(splitted[1]), fx_data)
 
 
     def write_to_ksh(self, file=sys.stdout, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
@@ -1226,6 +1227,10 @@ ver=167''', file=file)
                                         holds[event.button] = event.duration
                                     else:
                                         buffer.buttons[event.button] = KshLineBuf.ButtonState.PRESS
+                                        event.effect: int
+                                        if event.button.is_fx() and event.effect is not None:
+                                            letter = 'l' if event.button == Button.FX_L else 'r'
+                                            buffer.meta.append(f'fx-{letter}_se={event.effect}{AUDIO_EXTENSION}')
 
                     # Loop end stuff.
                     for cam_param in [x for x in ongoing_spcontroller_events.keys() if ongoing_spcontroller_events[x] is not None]:
@@ -1313,6 +1318,7 @@ CASES = {
     'double-fx': (1136, 'a'),
     'highpass-fx': (1014, 'm'),
     'old-vox-retrigger-fx': (71, 'e'),
+    'fx-chip-sound': (1048, 'm'),
     'basic-rolls': (271, 'e'),
     'camera': (250, 'i'),
     'tilt-mode': (34, 'i'),
@@ -1342,6 +1348,17 @@ def copy_preview(vox, song_dir):
 
     return os.path.basename(output_path)
 
+def do_copy_fx_chip_sounds(vox, out_dir):
+    print(f'> Copying FX chip sounds {vox.required_chip_sounds}.')
+    for sound in vox.required_chip_sounds:
+        src_path = f'{args.fx_chip_sound_dir}/{sound}{AUDIO_EXTENSION}'
+        target_path = f'{out_dir}/{sound}{AUDIO_EXTENSION}'
+        if os.path.exists(src_path):
+            copyfile(src_path, target_path)
+        else:
+            debug.record(Debug.Level.ERROR, 'copy_fx_chip_sound', f'cannot find file for chip sound with id {sound}')
+            copyfile(f'{args.fx_chip_sound_dir}/0{AUDIO_EXTENSION}', target_path)
+
 ##############
 # PROGRAM RUNTIME BEGINS BELOW
 #############
@@ -1359,6 +1376,7 @@ def main():
     argparser.add_argument('-m', '--no-convert', action='store_false', dest='do_convert')
     argparser.add_argument('-p', '--preview-only', action='store_true')
     argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
+    argparser.add_argument('-C', '--fx-chip-sound-dir', default='D:/SDVX-Extract/fx_chip_sound')
     argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
     argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')
     args = argparser.parse_args()
@@ -1492,6 +1510,10 @@ def main():
                         print(f'> Using jacket "{easier_jacket_path}".')
                         break
                     fallback_jacket_diff_idx -= 1
+
+            # Copy FX chip sounds.
+            if len(vox.required_chip_sounds) > 0:
+                do_copy_fx_chip_sounds(vox, song_dir)
 
         chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
 

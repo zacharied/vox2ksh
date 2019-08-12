@@ -35,13 +35,13 @@ class Debug:
         WARNING = 'warning'
         ERROR = 'error'
 
-    def __init__(self):
+    def __init__(self, exceptions_file="exceptions.txt"):
         self.state = None
         self.input_filename = None
         self.output_filename = None
         self.current_line_num = None
         self.exceptions_count = {}
-        self._exceptions_file = open("exceptions.txt", "w+")
+        self._exceptions_file = open(exceptions_file, "w+")
 
     def reset(self):
         for level in self.Level:
@@ -859,6 +859,8 @@ class Vox:
         return parser
 
     def parse(self):
+        global debug
+
         line_no = 0
         section_line_no = 0
 
@@ -899,6 +901,8 @@ class Vox:
         self.finalized = True
 
     def process_state(self, line, section_line_num):
+        global debug
+
         splitted = line.split('\t')
 
         if line == '':
@@ -1057,6 +1061,8 @@ class Vox:
 
 
     def write_to_ksh(self, file=sys.stdout, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
+        global debug
+
         # First print metadata.
         if jacket_idx is None:
             jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
@@ -1417,6 +1423,8 @@ def copy_preview(vox, song_dir):
     return os.path.basename(output_path)
 
 def do_copy_fx_chip_sounds(vox, out_dir):
+    global debug
+
     print(f'> Copying FX chip sounds {vox.required_chip_sounds}.')
     for sound in vox.required_chip_sounds:
         src_path = f'{args.fx_chip_sound_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
@@ -1432,11 +1440,12 @@ def do_copy_fx_chip_sounds(vox, out_dir):
 #############
 
 args = None
-debug = Debug()
+debug = None
 
 def main():
     global args
     argparser = argparse.ArgumentParser(description='Convert vox to ksh')
+    argparser.add_argument('-c', '--num-cores', default=3, type=int)
     argparser.add_argument('-t', '--testcase')
     argparser.add_argument('-i', '--song-id')
     argparser.add_argument('-d', '--song-difficulty')
@@ -1481,7 +1490,7 @@ def main():
     candidates = []
 
     for dirpath, dirnames, filenames in os.walk(VOX_ROOT):
-        for filename in filenames:
+        for filename in filter(lambda n: n.endswith('.vox'), filenames):
             import re
             fullpath = pjoin(dirpath, filename)
             if (args.song_id is None and args.testcase is None) or \
@@ -1507,8 +1516,23 @@ def main():
     for f in candidates:
         print(f'\t{f}')
 
+    groups = [[] for _ in range(args.num_cores)]
+    for i, candidate in enumerate(candidates):
+        groups[i % args.num_cores].append(candidate)
+
+    print(f'Beginning conversion across {args.num_cores} cores.')
+
+    core_num = 0
+    for i in range(1, len(groups)):
+        if os.fork() == 0:
+            core_num = i
+            break
+
+    global debug
+    debug = Debug(exceptions_file=f'exceptions_{core_num}.txt')
+
     # Load source directory.
-    for vox_path in candidates:
+    for vox_path in groups[core_num]:
         debug.state = Debug.State.INPUT
         debug.input_filename = vox_path
         debug.output_filename = None
@@ -1619,7 +1643,12 @@ def main():
         vox.close()
 
     debug.close()
-    exit(0)
+
+    if core_num > 0:
+        exit(0)
+    else:
+        for _ in range(1, args.num_cores):
+            os.wait()
 
 if __name__ == '__main__':
     main()

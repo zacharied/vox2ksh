@@ -1490,12 +1490,13 @@ def main():
                     try:
                         prev: str = next(filter(lambda n: n.split('/')[-1].split('_')[1] == filename.split('_')[1] and splitx(n)[0][-1] == splitx(filename)[0][-1], candidates))
                         if int(prev.split('/')[-1].split('_')[0]) < int(filename.split('_')[0]):
-                            print('Replacing')
                             candidates.remove(prev)
                         else:
                             continue
                     except StopIteration:
                         # Not clashing with anything.
+                        pass
+                    except IndexError:
                         pass
 
                     candidates.append(pjoin(dirpath, filename))

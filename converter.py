@@ -1277,10 +1277,9 @@ ver=167'''
                                                 event.effect: KshEffect
                                                 effect_string = f'{self.effect_defines[event.effect].fx_change(event.effect)}' if type(event.effect) is int else \
                                                     event.effect[0].to_ksh_name(event.effect[1])
+                                                buffer.meta.append(f'fx-{letter}={effect_string}')
                                             except KeyError:
                                                 debug.record_last_exception(tag='button_fx')
-                                                effect_string = f'{self.effect_defines[0].fx_change(0)}'
-                                            buffer.meta.append(f'fx-{letter}={effect_string}')
                                         buffer.buttons[event.button] = KshLineBuf.ButtonState.HOLD
                                         holds[event.button] = event.duration
                                     else:
@@ -1487,6 +1486,18 @@ def main():
                     (args.song_id is not None and f'_{args.song_id.zfill(4)}_' in filename) or \
                     (args.testcase is not None and re.match(rf'^.*00[1-4]_0*{CASES[args.testcase][0]}_.*{CASES[args.testcase][1]}\.vox$', fullpath)):
                 if args.song_difficulty is None or splitx(filename)[0][-1] == args.song_difficulty:
+                    # See if this is overriding an earlier game's version of the chart.
+                    try:
+                        prev: str = next(filter(lambda n: n.split('/')[-1].split('_')[1] == filename.split('_')[1] and splitx(n)[0][-1] == splitx(filename)[0][-1], candidates))
+                        if int(prev.split('/')[-1].split('_')[0]) < int(filename.split('_')[0]):
+                            print('Replacing')
+                            candidates.remove(prev)
+                        else:
+                            continue
+                    except StopIteration:
+                        # Not clashing with anything.
+                        pass
+
                     candidates.append(pjoin(dirpath, filename))
 
     print('The following files will be processed:')

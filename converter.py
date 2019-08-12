@@ -1066,7 +1066,7 @@ class Vox:
         if preview_basename is None:
             preview_basename = f'preview{AUDIO_EXTENSION}'
 
-        print(f'''// NekoConvert: {self.game_id} {self.song_id} {self.get_metadata("ascii")}
+        header = f'''// NekoConvert: {self.game_id} {self.song_id} {self.get_metadata("ascii")}
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
@@ -1088,7 +1088,9 @@ pfiltergain=50
 filtertype=peak
 chokkakuautovol=0
 chokkakuvol=50
-ver=167''', file=file)
+ver=167'''
+
+        print(header, file=file)
 
         print('--', file=file)
 
@@ -1111,7 +1113,7 @@ ver=167''', file=file)
         last_laser_timing = {s: None for s in LaserSide}
         last_filter = KshFilter.PEAK
         current_timesig = self.events[Timing(1, 1, 0)][EventKind.TIMESIG]
-        line_num = 0
+        debug.current_line_num = len(header.split('\n')) + 1
 
         measure_iter = range(self.end.measure)
         if progress_bar:
@@ -1137,8 +1139,6 @@ ver=167''', file=file)
                 beat = b + 1
 
                 for o in range(int(float(TICKS_PER_BEAT) * (4 / current_timesig.bottom))):
-                    line_num += 1
-
                     # However, vox offsets are 0-indexed.
 
                     now = Timing(measure, beat, o)
@@ -1323,9 +1323,15 @@ ver=167''', file=file)
                                 buffer.lasers[slam.side()] = ':'
                             slam_status[slam] -= 1
 
-                    print(buffer.out(), file=file)
+                    out = buffer.out()
+
+                    print(out, file=file)
+
+                    debug.current_line_num += len(out.split('\n'))
 
             print('--', file=file)
+
+            debug.current_line_num += 1
 
         for k, v in self.effect_defines.items():
             print(v.to_define_line(k), file=file)

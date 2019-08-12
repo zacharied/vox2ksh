@@ -9,8 +9,8 @@
 - [ ] Figure out the rest of the FX and parameters
 - [ ] Figure out the rest of the laser filters and parameters
 - [ ] Slam sounds / volume parameters?
-- [ ] Calculate spin duration correctly
-- [ ] Implement other kinds of spins
+- [x] Calculate roll duration correctly *(needs testing)*
+- [x] Implement other kinds of rolls
 - [ ] Test unnatural time signatures more
-- [ ] Fix lasers appearing chopped up in places
-- [ ] FX chip hitsounds
+- [x] Fix lasers appearing chopped up in places *(needs testing*)
+- [x] FX chip hitsounds

@@ -455,7 +455,8 @@ class Button(Enum):
         try:
             return next(x for x in cls if x.value == num)
         except StopIteration as err:
-            raise ValueError(f'invalid track number for button: {num}') from err
+            if num != 9:
+                raise ValueError(f'invalid track number for button: {num}') from err
 
     def to_track_num(self):
         return self.value

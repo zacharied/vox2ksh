@@ -500,6 +500,13 @@ class LaserCont(Enum):
     START = 1
     END = 2
 
+class RollKind(Enum):
+    MEASURE = 1
+    HALF_MEASURE = 2
+    THREE_BEAT = 3
+    CANCER = 4
+    SWING = 5
+
 class LaserNode:
     class Builder(dataobject):
         side: LaserSide = None
@@ -507,8 +514,7 @@ class LaserNode:
         node_type: LaserCont = None
         range: int = 1
         filter: KshFilter = KshFilter.PEAK
-        # TODO This is wrong (spins don't have a division I think).
-        spin_division: int = 0
+        roll_kind: RollKind = None
 
     def __init__(self, builder: Builder):
         self.side: LaserSide = builder.side
@@ -516,7 +522,7 @@ class LaserNode:
         self.node_cont: LaserCont = builder.node_type
         self.range: int = builder.range
         self.filter: KshFilter = builder.filter
-        self.spin_division: int = builder.spin_division
+        self.roll_kind: RollKind = builder.roll_kind
 
         if self.position < 0 or self.position > 127:
             raise ValueError(f'position {self.position} is out of bounds')
@@ -936,9 +942,11 @@ class Vox:
                 laser_node.side = LaserSide.LEFT if self.state_track == 1 else LaserSide.RIGHT
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
-                laser_node.spin_division = int(splitted[3])
-                if laser_node.spin_division == 3 or laser_node.spin_division == 4 or laser_node.spin_division > 5:
-                    debug.record(Debug.Level.ABNORMALITY, 'spin_parse', f'spin id: {laser_node.spin_division}')
+                try:
+                    laser_node.roll_kind = next(iter([r for r in RollKind if r.value == int(splitted[3])]))
+                except StopIteration:
+                    if splitted[3] != '0':
+                        debug.record(Debug.Level.ABNORMALITY, 'roll_parse', f'roll type: {splitted[3]}')
 
                 if len(splitted) > 4:
                     try:
@@ -1114,19 +1122,42 @@ ver=167''', file=file)
 
                                         slam_status[event] = SLAM_TICKS
 
-                                        if laser.spin_division != 0:
+                                        if laser.roll_kind is not None:
                                             if buffer.spin != '':
                                                 debug.record(Debug.Level.WARNING, 'ksh_laser', 'spin on both lasers')
 
-                                            buffer.spin = '@'
-                                            if event.direction() == LaserSlam.Direction.LEFT:
-                                                buffer.spin += '('
-                                            else:
-                                                buffer.spin += ')'
+                                            if laser.roll_kind.value <= 3:
+                                                buffer.spin = '@'
+                                                if event.direction() == LaserSlam.Direction.LEFT:
+                                                    buffer.spin += '('
+                                                else:
+                                                    buffer.spin += ')'
 
-                                            # Not exactly sure what's happening with spins so I'll multiply divisor by 2 for the time being.
-                                            # TODO Find a track with a shit ton of spins and investigate.
-                                            buffer.spin += str(int(192 / (event.start.spin_division * 1.7)))
+                                                # My assumption right now is that the MEASURE kind will always take one
+                                                # measure's worth of ticks. Likewise for the other ones.
+                                                if laser.roll_kind == RollKind.MEASURE:
+                                                    buffer.spin += str(int(current_timesig.top * current_timesig.ticks_per_beat() * 0.85))
+                                                elif laser.roll_kind == RollKind.HALF_MEASURE:
+                                                    buffer.spin += str(int((current_timesig.top * current_timesig.ticks_per_beat()) / 1.7))
+                                                elif laser.roll_kind == RollKind.THREE_BEAT:
+                                                    buffer.spin += str(int((current_timesig.top * current_timesig.ticks_per_beat()) * 0.62))
+
+                                            elif laser.roll_kind == RollKind.CANCER:
+                                                # TODO This roll.
+                                                buffer.spin = '@'
+                                                if event.direction() == LaserSlam.Direction.LEFT:
+                                                    buffer.spin += '('
+                                                else:
+                                                    buffer.spin += ')'
+                                                buffer.spin += str(current_timesig.top * current_timesig.ticks_per_beat() * 2)
+                                            elif laser.roll_kind == RollKind.SWING:
+                                                buffer.spin = '@'
+                                                if event.direction() == LaserSlam.Direction.LEFT:
+                                                    buffer.spin += '<'
+                                                else:
+                                                    buffer.spin += '>'
+                                                buffer.spin += str(int((current_timesig.top * current_timesig.ticks_per_beat()) * 0.62))
+
                                         # noinspection PyUnusedLocal
                                         event: LaserNode = event.start
 
@@ -1282,6 +1313,7 @@ CASES = {
     'double-fx': (1136, 'a'),
     'highpass-fx': (1014, 'm'),
     'old-vox-retrigger-fx': (71, 'e'),
+    'basic-rolls': (271, 'e'),
     'camera': (250, 'i'),
     'tilt-mode': (34, 'i'),
     'spc-tilt': (71, 'i'),

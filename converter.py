@@ -589,7 +589,6 @@ class Difficulty(Enum):
         return self.value[0] + 1
 
 class TiltMode(Enum):
-    # TODO Tweak -- is biggest correct?
     NORMAL = auto()
     BIGGER = auto()
     KEEP_BIGGER = auto()
@@ -938,6 +937,8 @@ class Vox:
                 laser_node.position = int(splitted[1])
                 laser_node.node_type = LaserCont(int(splitted[2]))
                 laser_node.spin_division = int(splitted[3])
+                if laser_node.spin_division == 3 or laser_node.spin_division == 4 or laser_node.spin_division > 5:
+                    debug.record(Debug.Level.ABNORMALITY, 'spin_parse', f'spin id: {laser_node.spin_division}')
 
                 if len(splitted) > 4:
                     try:
@@ -1112,6 +1113,7 @@ ver=167''', file=file)
                                             raise KshConvertError('new laser node spawn while trying to resolve slam')
 
                                         slam_status[event] = SLAM_TICKS
+
                                         if laser.spin_division != 0:
                                             if buffer.spin != '':
                                                 debug.record(Debug.Level.WARNING, 'ksh_laser', 'spin on both lasers')
@@ -1321,17 +1323,17 @@ def main():
     argparser.add_argument('-t', '--testcase')
     argparser.add_argument('-i', '--song-id')
     argparser.add_argument('-d', '--song-difficulty')
-    argparser.add_argument('-m', '--metadata-only', action='store_true')
+    argparser.add_argument('-n', '--no-media', action='store_false', dest='do_media')
+    argparser.add_argument('-m', '--no-convert', action='store_false', dest='do_convert')
     argparser.add_argument('-p', '--preview-only', action='store_true')
     argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
     argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
     argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')
-    argparser.add_argument('-n', '--no-media', action='store_true')
     args = argparser.parse_args()
 
     ID_TO_AUDIO = {}
 
-    if not args.no_media:
+    if args.do_media:
         print('Generating audio file mapping...')
         # Audio files should have a name starting with the ID followed by a space.
         for _, _, files in os.walk(args.audio_dir):
@@ -1417,7 +1419,7 @@ def main():
 
         using_difficulty_audio = False
 
-        if not args.no_media:
+        if args.do_media:
             target_audio_path = song_dir + '/track.ogg'
 
             src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
@@ -1464,18 +1466,21 @@ def main():
         debug.output_filename = chart_path
         debug.state = Debug.State.OUTPUT
 
-        print(f'> Writing KSH data to "{chart_path}".')
-        with open(chart_path, "w+", encoding='utf-8') as ksh_file:
-            try:
-                vox.write_to_ksh(file=ksh_file,
-                                 jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
-                                 track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
-                                 preview_basename=preview_basename)
-            except Exception as e:
-                print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
-                continue
-            print(f'> Finished conversion with {debug.exceptions_count[Debug.Level.ABNORMALITY]} abnormalities, {debug.exceptions_count[Debug.Level.WARNING]} warnings, and {debug.exceptions_count[Debug.Level.ERROR]} errors.')
+        if args.do_convert:
+            print(f'> Writing KSH data to "{chart_path}".')
+            with open(chart_path, "w+", encoding='utf-8') as ksh_file:
+                try:
+                    vox.write_to_ksh(file=ksh_file,
+                                     jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
+                                     track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
+                                     preview_basename=preview_basename)
+                except Exception as e:
+                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
+                    debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
+                    continue
+                print(f'> Finished conversion with {debug.exceptions_count[Debug.Level.ABNORMALITY]} abnormalities, {debug.exceptions_count[Debug.Level.WARNING]} warnings, and {debug.exceptions_count[Debug.Level.ERROR]} errors.')
+        else:
+            print(f'> Skipping conversion step.')
         vox.close()
 
     debug.close()

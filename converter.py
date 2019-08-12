@@ -775,6 +775,62 @@ class Vox:
         if timing not in self.events:
             self.events[timing] = {}
 
+    @staticmethod
+    def has_action_event(event_map):
+        """
+        :param event_map: The associative array mapping EventKinds to their respective events
+        :return: True if there is an "action" event (BT/FX press or hold start, VOL start node, slam) in the map
+        """
+        for kind in event_map.keys():
+            if type(kind) is tuple and kind[0] == EventKind.TRACK:
+                if 2 <= kind[1] <= 7 or type(event_map[kind]) is LaserSlam:
+                    return True
+
+    def time_iter(self, start: Timing, timesig: TimeSignature, condition_event=None, condition_timing=None):
+        """
+        Returns an iterator for the timing and event (or None) for each tick of the chart
+        :param start: the Timing moment to start iterating from
+        :param timesig: the timesig to start in
+        :param condition_event: a function that takes one argument, the event, and returns true to stop iterating there
+        :param condition_timing: a function that takes one argument, the timing, and returns true to stop iteration there
+        :return: the iterator
+        """
+        if start.offset > timesig.ticks_per_beat():
+            raise ValueError(f'start offset ({start.offset}) greater than ticks per beat ({timesig.ticks_per_beat()})')
+
+        if condition_timing is None:
+            condition_timing = lambda t: t == self.end
+
+        last_timesig = timesig
+
+        m = 0
+        while True:
+            measure = m + 1
+
+            now = Timing(measure, 1, 0)
+            if now in self.events:
+                for kind, event in self.events[now].items():
+                    if kind == EventKind.TIMESIG:
+                        last_timesig = self.events[now][EventKind.TIMESIG]
+
+            for b in range(0, last_timesig.top):
+                beat = b + 1
+
+                for offset in range(0, last_timesig.ticks_per_beat()):
+                    now = Timing(measure, beat, offset)
+
+                    if now in self.events and condition_event is not None:
+                        if condition_event(self.events[now]):
+                            return
+
+                    if condition_timing is not None:
+                        if condition_timing(now):
+                            return
+
+                    yield (now, self.events[now] if now in self.events else None)
+
+            m += 1
+
     @classmethod
     def from_file(cls, path):
         parser = Vox()

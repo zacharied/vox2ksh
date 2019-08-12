@@ -1067,7 +1067,9 @@ class Vox:
         if preview_basename is None:
             preview_basename = f'preview{AUDIO_EXTENSION}'
 
-        header = f'''// NekoConvert: {self.game_id} {self.song_id} {self.get_metadata("ascii")}
+        header = f'''// Source: {str(self.game_id).zfill(3)}_{str(self.song_id).zfill(4)}_{self.get_metadata("ascii")}_{self.diff_token()}.vox
+// Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
+// Contact Nekoht#8008 on Discord for bug reports and assistance.
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
@@ -1078,7 +1080,7 @@ level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
 m={track_basename}
 mvol={self.get_metadata('volume')}
-// Requires a patched USC to work.
+// previewfile requires a modified client (KSM and USC do not support it by default)
 previewfile={preview_basename}
 o=0
 bg=desert

@@ -1048,7 +1048,7 @@ class Vox:
                             sound_id = int(splitted[2])
                             if sound_id != -1 and sound_id != 255 and (sound_id >= FX_CHIP_SOUND_COUNT or sound_id < 0):
                                 debug.record(Debug.Level.WARNING, 'chip_sound_parse', f'unhandled chip sound id {sound_id}')
-                            elif sound_id != 0:
+                            elif 1 <= sound_id < FX_CHIP_SOUND_COUNT:
                                 fx_data = sound_id
                                 self.required_chip_sounds.add(sound_id)
 
@@ -1358,6 +1358,7 @@ METADATA_FIX = [
     ['\u9F72', '♥'],
     ['\u9F76', '♡'],
     ['\u9F77', 'é'],
+    ['?壬', 'êp']
 ]
 
 CASES = {
@@ -1370,7 +1371,7 @@ CASES = {
     'time-six-eight': (744, 'e'),
     'bpm': (262, 'n'),
     'early-version': (1, 'n'),
-    'encoding': (121, 'n'),
+    'encoding': (656, 'e'),
     'diff-preview': (26, 'i'),
     'new-fx': (1, 'i'),
     'crash-fx': (1208, 'e'),

@@ -23,7 +23,6 @@ FX_CHIP_SOUND_COUNT = 14
 
 AUDIO_EXTENSION = '.ogg'
 FX_CHIP_SOUND_EXTENSION = '.wav'
-VOX_ROOT = 'data'
 
 class Debug:
     class State(Enum):
@@ -846,13 +845,16 @@ class Vox:
 
     @classmethod
     def from_file(cls, path):
+        global args
+
         parser = Vox()
 
         file = open(path, 'r', encoding='cp932')
         parser.voxfile = file
 
         filename_array = os.path.basename(path).split('_')
-        with open('data/music_db.xml', encoding='cp932') as db:
+        # TODO Support multiple music_db.xml ?
+        with open(f'{args.db_dir}/music_db.xml', encoding='cp932') as db:
             try:
                 parser.game_id = int(filename_array[0])
                 parser.song_id = int(filename_array[1])
@@ -1532,6 +1534,8 @@ def main():
     argparser.add_argument('-d', '--song-difficulty')
     argparser.add_argument('-n', '--no-media', action='store_false', dest='do_media')
     argparser.add_argument('-m', '--no-convert', action='store_false', dest='do_convert')
+    argparser.add_argument('-V', '--vox-dir', default='D:/SDVX-Extract/vox')
+    argparser.add_argument('-D', '--db-dir', default='D:/SDVX-Extract/music_db')
     argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
     argparser.add_argument('-C', '--fx-chip-sound-dir', default='D:/SDVX-Extract/fx_chip_sound')
     argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
@@ -1569,7 +1573,7 @@ def main():
 
     candidates = []
 
-    for dirpath, dirnames, filenames in os.walk(VOX_ROOT):
+    for dirpath, dirnames, filenames in os.walk(args.vox_dir):
         for filename in filter(lambda n: n.endswith('.vox'), filenames):
             import re
             fullpath = pjoin(dirpath, filename)

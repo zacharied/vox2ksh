@@ -583,6 +583,12 @@ class Difficulty(Enum):
     def to_jacket_ifs_numer(self):
         return self.value[0] + 1
 
+class InfiniteVersion(Enum):
+    INFINITE = 2
+    GRAVITY = 3
+    HEAVENLY = 4
+    VIVID = 5
+
 class TiltMode(Enum):
     NORMAL = auto()
     BIGGER = auto()
@@ -775,6 +781,11 @@ class Vox:
     def timing_point(self, timing):
         if timing not in self.events:
             self.events[timing] = {}
+
+    def get_real_difficulty(self) -> str:
+        if self.difficulty == Difficulty.INFINITE:
+            return next(iter([v for v in InfiniteVersion if v.value == int(self.get_metadata('inf_ver'))]))
+        return self.difficulty.name.lower()
 
     @staticmethod
     def has_action_event(event_map):
@@ -1076,17 +1087,19 @@ class Vox:
         header = f'''// Source: {str(self.game_id).zfill(3)}_{str(self.song_id).zfill(4)}_{self.get_metadata("ascii")}_{self.diff_token()}.vox
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
 // Contact Nekoht#8008 on Discord for bug reports and assistance.
+// previewfile and realdifficulty require a modified client to have any effect (the official releases of USC and KSM do
+//   not have support for these fields).
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
 jacket={jacket_idx}.png
 illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
+realdifficulty={self.get_real_difficulty()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
 m={track_basename}
 mvol={self.get_metadata('volume')}
-// previewfile requires a modified client (KSM and USC do not support it by default)
 previewfile={preview_basename}
 o=0
 bg=desert

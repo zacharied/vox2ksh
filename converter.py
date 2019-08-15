@@ -724,6 +724,7 @@ class Vox:
 
     def __init__(self):
         self.voxfile = None
+        self.ascii = None
         self.game_id = 0
         self.song_id = 0
         self.vox_version = 0
@@ -747,7 +748,7 @@ class Vox:
         self.required_chip_sounds = set()
 
     def __str__(self):
-        return f'{self.get_metadata("ascii")} {self.diff_token()}'
+        return f'{self.ascii} {self.diff_token()}'
 
     def diff_token(self):
         return str(self.difficulty_idx) + self.difficulty.to_letter()
@@ -866,6 +867,8 @@ class Vox:
                 raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
 
             parser.metadata = tree[0]
+
+        parser.ascii = parser.get_metadata('ascii')
 
         return parser
 
@@ -1071,18 +1074,15 @@ class Vox:
                 self.events[now][(EventKind.TRACK, self.state_track)] = ButtonPress(button, int(splitted[1]), fx_data)
 
 
-    def write_to_ksh(self, file=sys.stdout, jacket_idx=None, progress_bar=True, track_basename=None, preview_basename=None):
+    def write_to_ksh(self, jacket_idx=None, infinite_audio=False, infinite_preview=False, file=sys.stdout):
+        global args
         global debug
 
-        # First print metadata.
-        if jacket_idx is None:
-            jacket_idx = str(self.difficulty.to_jacket_ifs_numer())
-
-        if track_basename is None:
-            track_basename = f'track{AUDIO_EXTENSION}'
-
-        if preview_basename is None:
-            preview_basename = f'preview{AUDIO_EXTENSION}'
+        track_basename = '' if infinite_audio is None else \
+            f'track{AUDIO_EXTENSION}' if not infinite_audio else f'track_inf{AUDIO_EXTENSION}'
+        preview_basename = '' if infinite_preview is None else \
+            f'preview{AUDIO_EXTENSION}' if not infinite_preview else f'preview_inf{AUDIO_EXTENSION}'
+        jacket_basename = '' if jacket_idx is None else f'{jacket_idx}.png'
 
         header = f'''// Source: {str(self.game_id).zfill(3)}_{str(self.song_id).zfill(4)}_{self.get_metadata("ascii")}_{self.diff_token()}.vox
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
@@ -1092,7 +1092,7 @@ class Vox:
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
-jacket={jacket_idx}.png
+jacket={jacket_basename}
 illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
 realdifficulty={self.get_real_difficulty()}
@@ -1138,9 +1138,6 @@ ver=167'''
         debug.current_line_num = len(header.split('\n')) + 1
 
         measure_iter = range(self.end.measure)
-        if progress_bar:
-            from tqdm import tqdm
-            measure_iter = tqdm(measure_iter, unit='measure', leave=False)
 
         for m in measure_iter:
             measure = m + 1
@@ -1303,7 +1300,8 @@ ver=167'''
                                                 debug.record_last_exception(tag='button_fx')
                                         buffer.buttons[event.button] = KshLineBuf.ButtonState.HOLD
                                         holds[event.button] = event.duration
-                                    else:
+                                    elif args.do_media:
+                                        # Check for a chip sound.
                                         buffer.buttons[event.button] = KshLineBuf.ButtonState.PRESS
                                         event.effect: int
                                         if event.button.is_fx() and event.effect is not None:
@@ -1413,15 +1411,83 @@ CASES = {
     'wtf': (1361, 'm'),
 }
 
-# TODO Split up the copy process into functions like this.
-def copy_preview(vox, song_dir):
-    output_path = f'{song_dir}/preview{AUDIO_EXTENSION}'
+def do_copy_audio(vox, out_dir, id_audio_map):
+    """
+    Search for and copy the track's audio file to the output directory.
+    :return: True if the track is using an `_inf` audio file, False otherwise.
+    """
+    global args
+
+    target_audio_path = f'{out_dir}/track.ogg'
+
+    src_audio_path = f'{args.audio_dir}/{id_audio_map[vox.song_id]}'
+
+    using_inf_audio = False
+
+    if vox.difficulty == Difficulty.INFINITE:
+        src_audio_path_diff = f'{splitx(src_audio_path)[0]}_4i{splitx(src_audio_path)[1]}'
+        if os.path.exists(src_audio_path_diff):
+            print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
+            src_audio_path = src_audio_path_diff
+            target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
+            using_inf_audio = True
+
+    if not os.path.exists(target_audio_path):
+        print(f'> Copying audio file "{src_audio_path}" to song directory.')
+        copyfile(src_audio_path, target_audio_path)
+    else:
+        print(f'> Audio file "{target_audio_path}" already exists.')
+
+    return using_inf_audio
+
+def do_copy_jacket(vox, out_dir):
+    """
+    Find and copy the jacket image file for this vox to the output directory.
+    :return: The index of the jacket used by this vox.
+    """
+    global args
+
+    src_jacket_token = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
+    src_jacket_path = args.jacket_dir + '/' + src_jacket_token + '_ifs/tex/' + src_jacket_token + '.png'
+
+    if os.path.exists(src_jacket_path):
+        target_jacket_path = f'{out_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+        print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+        copyfile(src_jacket_path, target_jacket_path)
+    else:
+        print(f'> Could not find jacket image file. Checking easier diffs.')
+        fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
+
+        while True:
+            if fallback_jacket_diff_idx < 0:
+                print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                return -1
+
+            easier_jacket_path = f'{out_dir}/{fallback_jacket_diff_idx}.png'
+            if os.path.exists(easier_jacket_path):
+                # We found the diff number with the jacket.
+                print(f'> Using jacket "{easier_jacket_path}".')
+                return fallback_jacket_diff_idx
+            fallback_jacket_diff_idx -= 1
+
+    return vox.difficulty.to_jacket_ifs_numer()
+
+def do_copy_preview(vox, out_dir):
+    """
+    Find and copy the preview for this vox to the output directory.
+    :return: True if this chart has a difficulty-specific preview file, False otherwise.
+    """
+    global args
+
+    output_path = f'{out_dir}/preview{AUDIO_EXTENSION}'
     preview_path = f'{args.preview_dir}/{vox.song_id}{AUDIO_EXTENSION}'
     diff_preview_path = f'{splitx(preview_path)[0]}_{vox.diff_token()}{AUDIO_EXTENSION}'
+    using_difficulty_preview = False
 
     if os.path.exists(diff_preview_path):
         preview_path = diff_preview_path
         output_path = f'{splitx(output_path)[0]}_{vox.diff_token()}{splitx(output_path)[1]}'
+        using_difficulty_preview = True
 
     if os.path.exists(output_path):
         print(f'> Preview file "{output_path}" already exists.')
@@ -1433,9 +1499,11 @@ def copy_preview(vox, song_dir):
     else:
         print('> No preview file found.')
 
-    return os.path.basename(output_path)
+    return using_difficulty_preview
 
 def do_copy_fx_chip_sounds(vox, out_dir):
+    """ For each FX chip sound used in the chart, copy the sound file to the output directory. """
+    global args
     global debug
 
     print(f'> Copying FX chip sounds {vox.required_chip_sounds}.')
@@ -1464,14 +1532,13 @@ def main():
     argparser.add_argument('-d', '--song-difficulty')
     argparser.add_argument('-n', '--no-media', action='store_false', dest='do_media')
     argparser.add_argument('-m', '--no-convert', action='store_false', dest='do_convert')
-    argparser.add_argument('-p', '--preview-only', action='store_true')
     argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
     argparser.add_argument('-C', '--fx-chip-sound-dir', default='D:/SDVX-Extract/fx_chip_sound')
     argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
     argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')
     args = argparser.parse_args()
 
-    ID_TO_AUDIO = {}
+    id_audio_map = {}
 
     if args.do_media:
         print('Generating audio file mapping...')
@@ -1482,10 +1549,10 @@ def main():
                     continue
                 try:
                     if splitx(f)[1] == '.ogg' and not f.endswith('_4i.ogg'):
-                        ID_TO_AUDIO[int(splitx(os.path.basename(f))[0])] = f
+                        id_audio_map[int(splitx(os.path.basename(f))[0])] = f
                 except ValueError as e:
                     print(e)
-        print(f'{len(ID_TO_AUDIO)} songs processed.')
+        print(f'{len(id_audio_map)} songs processed.')
 
     if args.testcase:
         if not args.testcase in CASES:
@@ -1521,6 +1588,7 @@ def main():
                         # Not clashing with anything.
                         pass
                     except IndexError:
+                        # Malformed file name.
                         pass
 
                     candidates.append(pjoin(dirpath, filename))
@@ -1559,80 +1627,37 @@ def main():
             debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
             continue
 
-        try:
-            print(f'> Processing "{vox_path}": "{str(vox)}"')
-        except (AttributeError, LookupError):
-            print('An error occurred with loading the metadata.')
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
-            continue
+        print(f'> Processing "{vox_path}": {str(vox)}')
 
         # First try to parse the file.
         try:
             vox.parse()
         except Exception as e:
-            print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
+            print(f'> Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
             debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
             continue
 
-        song_dir = f'out/{vox.get_metadata("ascii")}'
+        # Make the output directory.
+        song_dir = f'out/{vox.ascii}'
         if not os.path.isdir(song_dir):
             print(f'> Creating song directory "{song_dir}".')
             os.mkdir(song_dir)
 
-        preview_basename = copy_preview(vox, song_dir)
-        if args.preview_only:
-            continue
+        jacket_idx = None
+        infinite_audio = None
+        infinite_preview = None
 
-        fallback_jacket_diff_idx = None
-
-        using_difficulty_audio = False
-
+        # Copy media files over.
         if args.do_media:
-            target_audio_path = song_dir + '/track.ogg'
-
-            src_audio_path = args.audio_dir + '/' + ID_TO_AUDIO[vox.song_id]
-
-            if vox.difficulty == Difficulty.INFINITE:
-                src_audio_path_diff = f'{splitx(src_audio_path)[0]}_4i{splitx(src_audio_path)[1]}'
-                if os.path.exists(src_audio_path_diff):
-                    print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
-                    src_audio_path = src_audio_path_diff
-                    target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
-                    using_difficulty_audio = True
-
-            if not os.path.exists(target_audio_path):
-                print(f'> Copying audio file {src_audio_path} to song directory.')
-                copyfile(src_audio_path, target_audio_path)
-            else:
-                print(f'> Audio file "{target_audio_path}" already exists.')
-
-            src_jacket_basename = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-            src_jacket_path = args.jacket_dir + '/' + src_jacket_basename + '_ifs/tex/' + src_jacket_basename + '.png'
-
-            if os.path.exists(src_jacket_path):
-                target_jacket_path = f'{song_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
-                print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
-                copyfile(src_jacket_path, target_jacket_path)
-            else:
-                print(f'> Could not find jacket image file. Checking easier diffs.')
-                fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
-                while True:
-                    if fallback_jacket_diff_idx < 0:
-                        print('> No jackets found for easier difficulties either. Leaving jacket blank.')
-                        fallback_jacket_diff_idx = ''
-                        break
-
-                    easier_jacket_path = f'{song_dir}/{fallback_jacket_diff_idx}.png'
-                    if os.path.exists(easier_jacket_path):
-                        # We found the diff number with the jacket.
-                        print(f'> Using jacket "{easier_jacket_path}".')
-                        break
-                    fallback_jacket_diff_idx -= 1
+            infinite_audio = do_copy_audio(vox, song_dir, id_audio_map)
+            jacket_idx = do_copy_jacket(vox, song_dir)
+            infinite_preview = do_copy_preview(vox, song_dir)
 
             # Copy FX chip sounds.
             if len(vox.required_chip_sounds) > 0:
                 do_copy_fx_chip_sounds(vox, song_dir)
 
+        # Output the KSH chart.
         chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
 
         debug.output_filename = chart_path
@@ -1642,10 +1667,10 @@ def main():
             print(f'> Writing KSH data to "{chart_path}".')
             with open(chart_path, "w+", encoding='utf-8') as ksh_file:
                 try:
-                    vox.write_to_ksh(file=ksh_file,
-                                     jacket_idx=str(fallback_jacket_diff_idx) if fallback_jacket_diff_idx is not None else None,
-                                     track_basename=f'track_inf{AUDIO_EXTENSION}' if using_difficulty_audio else None,
-                                     preview_basename=preview_basename)
+                    vox.write_to_ksh(jacket_idx=jacket_idx,
+                                     infinite_audio=infinite_audio,
+                                     infinite_preview=infinite_preview,
+                                     file=ksh_file)
                 except Exception as e:
                     print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
                     debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)

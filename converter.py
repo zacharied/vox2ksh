@@ -1061,7 +1061,11 @@ class Vox:
                     if type(slam_start) is LaserSlam:
                         # A few charts have three laser nodes at the same time point for some reason.
                         slam_start = slam_start.end
-                    slam = LaserSlam(slam_start, laser_node)
+                    try:
+                        slam = LaserSlam(slam_start, laser_node)
+                    except ValueError:
+                        debug.record_last_exception(Debug.Level.WARNING, tag='slam_parse')
+                        return
                     self.events[now][(EventKind.TRACK, self.state_track)] = slam
 
             else:

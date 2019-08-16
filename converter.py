@@ -1095,11 +1095,13 @@ class Vox:
         header = f'''// Source: {str(self.game_id).zfill(3)}_{str(self.song_id).zfill(4)}_{self.get_metadata("ascii")}_{self.diff_token()}.vox
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
 // Contact Nekoht#8008 on Discord for bug reports and assistance.
-// previewfile and realdifficulty require a modified client to have any effect (the official releases of USC and KSM do
-//   not have support for these fields).
+// previewfile, realdifficulty, and the sort fields require a modified client to have any effect (the official releases 
+//   of USC and KSM do not have support for these fields).
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
+sorttitle={self.get_metadata('title_yomigana')}
+sortartist={self.get_metadata('artist_yomigana')}
 jacket={jacket_basename}
 illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}

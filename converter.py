@@ -1452,10 +1452,15 @@ def do_copy_audio(vox, out_dir):
     :return: True if the track is using an `_inf` audio file, False otherwise.
     """
     global args
+    global debug
 
     target_audio_path = f'{out_dir}/track.ogg'
 
     src_audio_path = f'{args.audio_dir}/{vox.song_id}{AUDIO_EXTENSION}'
+
+    if not os.path.exists(src_audio_path):
+        debug.record(Debug.Level.WARNING, 'audio_copy', 'no audio file found')
+        return None
 
     using_inf_audio = False
 
@@ -1481,6 +1486,7 @@ def do_copy_jacket(vox, out_dir):
     :return: The index of the jacket used by this vox.
     """
     global args
+    global debug
 
     src_jacket_token = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
     src_jacket_path = args.jacket_dir + '/' + src_jacket_token + '_ifs/tex/' + src_jacket_token + '.png'
@@ -1496,7 +1502,8 @@ def do_copy_jacket(vox, out_dir):
         while True:
             if fallback_jacket_diff_idx < 0:
                 print('> No jackets found for easier difficulties either. Leaving jacket blank.')
-                return -1
+                debug.record(Debug.Level.WARNING, 'copy_jacket', 'could not find any jackets to copy')
+                return None
 
             easier_jacket_path = f'{out_dir}/{fallback_jacket_diff_idx}.png'
             if os.path.exists(easier_jacket_path):
@@ -1513,6 +1520,7 @@ def do_copy_preview(vox, out_dir):
     :return: True if this chart has a difficulty-specific preview file, False otherwise.
     """
     global args
+    global debug
 
     output_path = f'{out_dir}/preview{AUDIO_EXTENSION}'
     preview_path = f'{args.preview_dir}/{vox.song_id}{AUDIO_EXTENSION}'
@@ -1533,6 +1541,8 @@ def do_copy_preview(vox, out_dir):
         copyfile(preview_path, output_path)
     else:
         print('> No preview file found.')
+        debug.record(Debug.Level.WARNING, 'preview_copy', 'could not find preview file')
+        return None
 
     return using_difficulty_preview
 

@@ -1,4 +1,5 @@
 from enum import Enum, auto
+from glob import glob
 from typing import Union
 
 from recordclass import dataobject
@@ -860,21 +861,23 @@ class Vox:
 
         filename_array = os.path.basename(path).split('_')
         # TODO Support multiple music_db.xml ?
-        with open(f'{args.db_dir}/music_db.xml', encoding='cp932') as db:
-            try:
-                parser.game_id = int(filename_array[0])
-                parser.song_id = int(filename_array[1])
-                parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
-                parser.difficulty_idx = os.path.splitext(path)[0][-2]
-            except ValueError:
-                raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
+        for file in glob(f'{args.db_dir}/*.xml'):
+            with open(file, encoding='cp932') as db:
+                try:
+                    parser.game_id = int(filename_array[0])
+                    parser.song_id = int(filename_array[1])
+                    parser.difficulty = Difficulty.from_letter(os.path.splitext(path)[0][-1])
+                    parser.difficulty_idx = os.path.splitext(path)[0][-2]
+                except ValueError:
+                    raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
 
-            tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
+                tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
 
-            if len(tree) == 0:
-                raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
+                if len(tree) > 0:
+                    parser.metadata = tree[0]
 
-            parser.metadata = tree[0]
+        if parser.metadata is None:
+            raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')
 
         parser.ascii = parser.get_metadata('ascii')
 
@@ -1427,6 +1430,7 @@ CASES = {
     'tilt-mode': (34, 'i'),
     'spc-tilt': (71, 'i'),
     'wtf': (1361, 'm'),
+    'removed-data': (233, 'e')
 }
 
 def do_copy_audio(vox, out_dir, id_audio_map):

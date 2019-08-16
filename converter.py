@@ -100,7 +100,12 @@ class Timing:
         """ Create a Timing from the format string that appears in the first column of vox tracks. """
         splitted = time.split(',')
         # TODO check bounds using current time signature
-        return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
+        try:
+            return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
+        except ValueError:
+            return None
+        except IndexError:
+            return None
 
     def diff(self, other, timesig):
         return (self.measure - other.measure) * (timesig.ticks_per_beat() * timesig.top) \
@@ -935,12 +940,9 @@ class Vox:
         if line == '':
             return
 
-        now = None
-        try:
-            now = Timing.from_time_str(splitted[0])
+        now = Timing.from_time_str(splitted[0])
+        if now is not None:
             self.timing_point(now)
-        except IndexError:
-            pass
 
         if self.state == self.State.FORMAT_VERSION:
             self.vox_version = int(line)

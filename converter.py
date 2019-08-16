@@ -1446,7 +1446,7 @@ CASES = {
     'removed-data': (233, 'e')
 }
 
-def do_copy_audio(vox, out_dir, id_audio_map):
+def do_copy_audio(vox, out_dir):
     """
     Search for and copy the track's audio file to the output directory.
     :return: True if the track is using an `_inf` audio file, False otherwise.
@@ -1455,7 +1455,7 @@ def do_copy_audio(vox, out_dir, id_audio_map):
 
     target_audio_path = f'{out_dir}/track.ogg'
 
-    src_audio_path = f'{args.audio_dir}/{id_audio_map[vox.song_id]}'
+    src_audio_path = f'{args.audio_dir}/{vox.song_id}{AUDIO_EXTENSION}'
 
     using_inf_audio = False
 
@@ -1526,7 +1526,7 @@ def do_copy_preview(vox, out_dir):
 
     if os.path.exists(output_path):
         print(f'> Preview file "{output_path}" already exists.')
-        return
+        return using_difficulty_preview
 
     if os.path.exists(preview_path):
         print(f'> Copying preview to "{output_path}".')
@@ -1574,22 +1574,6 @@ def main():
     argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
     argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')
     args = argparser.parse_args()
-
-    id_audio_map = {}
-
-    if args.do_media:
-        print('Generating audio file mapping...')
-        # Audio files should have a name starting with the ID followed by a space.
-        for _, _, files in os.walk(args.audio_dir):
-            for f in files:
-                if os.path.basename(f) == 'jk':
-                    continue
-                try:
-                    if splitx(f)[1] == '.ogg' and not f.endswith('_4i.ogg'):
-                        id_audio_map[int(splitx(os.path.basename(f))[0])] = f
-                except ValueError as e:
-                    print(e)
-        print(f'{len(id_audio_map)} songs processed.')
 
     if args.testcase:
         if not args.testcase in CASES:
@@ -1686,7 +1670,7 @@ def main():
 
         # Copy media files over.
         if args.do_media:
-            infinite_audio = do_copy_audio(vox, song_dir, id_audio_map)
+            infinite_audio = do_copy_audio(vox, song_dir)
             jacket_idx = do_copy_jacket(vox, song_dir)
             infinite_preview = do_copy_preview(vox, song_dir)
 

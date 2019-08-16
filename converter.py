@@ -798,7 +798,7 @@ class Vox:
 
     def get_real_difficulty(self) -> str:
         if self.difficulty == Difficulty.INFINITE:
-            return next(iter([v for v in InfiniteVersion if v.value == int(self.get_metadata('inf_ver'))]))
+            return next(iter([v for v in InfiniteVersion if v.value == int(self.get_metadata('inf_ver'))])).name.lower()
         return self.difficulty.name.lower()
 
     @staticmethod

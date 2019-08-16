@@ -99,9 +99,7 @@ class Timing:
     def from_time_str(cls, time: str):
         """ Create a Timing from the format string that appears in the first column of vox tracks. """
         splitted = time.split(',')
-        # TODO Use current time signature
-        if int(splitted[2]) >= TICKS_PER_BEAT:
-            raise ValueError(f'offset of {int(splitted[2])} is greater than maximum')
+        # TODO check bounds using current time signature
         return cls(int(splitted[0]), int(splitted[1]), int(splitted[2]))
 
     def diff(self, other, timesig):
@@ -954,7 +952,11 @@ class Vox:
         elif self.state == self.State.BPM:
             now = Timing(1, 1, 0)
             self.timing_point(now)
-            self.events[now][EventKind.BPM] = float(line)
+            try:
+                self.events[now][EventKind.BPM] = float(line)
+            except ValueError:
+                # Jomanda adv seems to have the string "BAROFF" at one point.
+                debug.record_last_exception(Debug.Level.ABNORMALITY, tag='bpm_parse')
 
         elif self.state == self.State.BPM_INFO:
             if splitted[2] != '4':
@@ -1012,7 +1014,12 @@ class Vox:
                 return
 
             if param is not None:
-                self.events[now][(EventKind.SPCONTROLLER, param)] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
+                try:
+                    self.events[now][(EventKind.SPCONTROLLER, param)] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
+                except ValueError:
+                    # Just record it as an abnormality.
+                    pass
+
             if SpcParam.line_is_abnormal(param, splitted):
                 debug.record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
 
@@ -1195,7 +1202,7 @@ ver=167'''
                                 cam_param: SpcParam = kind[1]
                                 if cam_param.to_ksh_value() is not None:
                                     if ongoing_spcontroller_events[cam_param] is not None and ongoing_spcontroller_events[cam_param].time_left != 0:
-                                        raise KshConvertError(f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
+                                        debug.record(Debug.Level.WARNING, 'spnode_output', f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
                                     ongoing_spcontroller_events[cam_param] = SpControllerCountdown(event=event, time_left=event.duration)
                                     buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.start_param)}')
 

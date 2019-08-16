@@ -21,6 +21,8 @@ SLAM_TICKS = 4
 
 FX_CHIP_SOUND_COUNT = 14
 
+KSH_DEFAULT_FILTER_GAIN = 50
+
 AUDIO_EXTENSION = '.ogg'
 FX_CHIP_SOUND_EXTENSION = '.wav'
 VOX_ROOT = 'data'
@@ -200,6 +202,7 @@ class SpcParam(Enum):
 class KshFilter(Enum):
     @classmethod
     def from_vox_filter_id(cls, filter_id):
+        # TODO Correct this so filter indices line up with the TAB EFFECT INFO instead of being hardcoded
         if filter_id == 0:
             return cls.PEAK
         elif filter_id == 1 or filter_id == 2:
@@ -208,6 +211,9 @@ class KshFilter(Enum):
             return cls.HIGHPASS
         elif filter_id == 5:
             return cls.BITCRUSH
+        elif filter_id == 6:
+            # TODO Figure out how effect 6 (and up?) is assigned.
+            return cls.PEAK
         raise ValueError(f'unrecognized vox filter id {filter_id}')
 
     def to_ksh_name(self):
@@ -1093,7 +1099,7 @@ bg=desert
 layer=arrow
 po=0
 plength=15000
-pfiltergain=50
+pfiltergain={KSH_DEFAULT_FILTER_GAIN}
 filtertype=peak
 chokkakuautovol=0
 chokkakuvol=50
@@ -1262,8 +1268,15 @@ ver=167'''
                                         buffer.meta.append(f'laserrange_{event.side.to_letter()}={event.range}x')
                                         laser_range[event.side] = event.range
 
-                                    if event.filter != last_filter:
-                                        buffer.meta.append(f'filtertype={event.filter.to_ksh_name()}')
+                                    if event.node_cont != LaserCont.END and event.filter != last_filter:
+                                        if last_filter is None:
+                                            buffer.meta.append(f'pfiltergain={KSH_DEFAULT_FILTER_GAIN}')
+
+                                        if event.filter is None:
+                                            buffer.meta.append(f'pfiltergain=0')
+                                        else:
+                                            buffer.meta.append(f'filtertype={event.filter.to_ksh_name()}')
+
                                         last_filter = event.filter
 
                                     if not skip_laser:
@@ -1379,6 +1392,7 @@ CASES = {
     'basic': (781, 'm'),
     'laser-range': (1138, 'e'),
     'laser-range-refreshing-fix': (980, 'e'),
+    'laser-effect-6': (122, 'i'),
     'choppy-laser': (1332, 'a'),
     'slam-range': (529, 'e'),
     'time-signature': (56, 'i'),

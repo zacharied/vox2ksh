@@ -273,6 +273,8 @@ class KshEffectDefine:
     @classmethod
     def from_pre_v4_vox_sound_id(cls, sound_id):
         """Generate an effect definition line from the old-style effect declaration."""
+        global debug
+
         define = cls.default_effect()
 
         if sound_id == 2:
@@ -297,7 +299,9 @@ class KshEffectDefine:
             define.effect = KshEffect.PITCHSHIFT
             define.main_param = '8' # TODO Tweak
         elif sound_id > 8:
-            raise ValueError(f'old vox sound id {sound_id} does not exist')
+            debug.record(Debug.Level.WARNING, 'fx_parse', f'old vox sound id {sound_id} unknown')
+            define.effect = KshEffect.FLANGER
+            define.main_param = '200'
 
         return define
 

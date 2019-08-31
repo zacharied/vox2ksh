@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from glob import glob
+from threading import Thread
 from typing import Union
 
 from recordclass import dataobject
@@ -23,6 +24,8 @@ SLAM_TICKS = 4
 FX_CHIP_SOUND_COUNT = 14
 
 KSH_DEFAULT_FILTER_GAIN = 50
+
+EFFECT_FALLBACK_NAME = 'fallback'
 
 AUDIO_EXTENSION = '.ogg'
 FX_CHIP_SOUND_EXTENSION = '.wav'
@@ -312,14 +315,15 @@ class KshEffectDefine:
     def default_effect(cls):
         define = KshEffectDefine()
         define.effect = KshEffect.FLANGER
+        define.main_param = '200'
+        define.params['depth'] = f'{define.main_param}samples'
         return define
 
     @classmethod
     def from_effect_info_line(cls, line):
         splitted = line.replace('\t', '').split(',')
 
-        define = KshEffectDefine()
-        define.effect = KshEffect.FLANGER
+        define = KshEffectDefine.default_effect()
 
         if splitted[0] == '1' or splitted[0] == '8':
             # TODO No way this is right
@@ -743,6 +747,7 @@ class Vox:
         self.vox_version = 0
         self.vox_defines = {} # defined in the vox file
         self.effect_defines = {} # will be defined in the ksh file
+        self.effect_fallback = KshEffectDefine.default_effect()
         self.end = None
         self.events = {}
 
@@ -1088,7 +1093,15 @@ class Vox:
                         if self.vox_version < 4:
                             fx_data = int(splitted[3]) if splitted[3].isdigit() else int(self.vox_defines[splitted[3]])
                         else:
-                            fx_data = int(splitted[2]) - 2
+                            if 2 <= int(splitted[2]) <= 13:
+                                # It's a regular effect.
+                                fx_data = int(splitted[2]) - 2
+                            elif int(splitted[2]) == 254:
+                                debug.record(Debug.Level.WARNING, 'button_fx', 'reverb effect is unimplemented, using fallback')
+                                fx_data = -1
+                            else:
+                                debug.record(Debug.Level.WARNING, 'button_fx', 'out of bounds fx index for FX hold, using fallback')
+                                fx_data = -1
                     else:
                         # Fx chip, check for sound.
                         if self.vox_version >= 4:
@@ -1329,9 +1342,10 @@ ver=167'''
                                         if event.button.is_fx():
                                             letter = 'l' if event.button == Button.FX_L else 'r'
                                             try:
-                                                event.effect: KshEffect
-                                                effect_string = f'{self.effect_defines[event.effect].fx_change(event.effect)}' if type(event.effect) is int else \
-                                                    event.effect[0].to_ksh_name(event.effect[1])
+                                                if type(event.effect) is int:
+                                                    effect_string = self.effect_defines[event.effect].fx_change(event.effect) if event.effect >= 0 else self.effect_fallback.fx_change(EFFECT_FALLBACK_NAME)
+                                                else:
+                                                    effect_string = event.effect[0].to_ksh_name(event.effect[1])
                                                 buffer.meta.append(f'fx-{letter}={effect_string}')
                                             except KeyError:
                                                 debug.record_last_exception(tag='button_fx')
@@ -1391,6 +1405,7 @@ ver=167'''
 
         for k, v in self.effect_defines.items():
             print(v.to_define_line(k), file=file)
+        print(self.effect_fallback.to_define_line(EFFECT_FALLBACK_NAME), file=file)
 
     def close(self):
         self.voxfile.close()

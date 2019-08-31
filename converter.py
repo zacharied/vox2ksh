@@ -1245,7 +1245,7 @@ ver=167'''
                                                 if laser.roll_kind == RollKind.MEASURE:
                                                     buffer.spin += str(int(current_timesig.top * current_timesig.ticks_per_beat() * 0.85))
                                                 elif laser.roll_kind == RollKind.HALF_MEASURE:
-                                                    buffer.spin += str(int((current_timesig.top * current_timesig.ticks_per_beat()) / 1.7))
+                                                    buffer.spin += str(int((current_timesig.top * current_timesig.ticks_per_beat()) / 2.95))
                                                 elif laser.roll_kind == RollKind.THREE_BEAT:
                                                     buffer.spin += str(int((current_timesig.top * current_timesig.ticks_per_beat()) * 0.62))
 

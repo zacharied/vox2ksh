@@ -29,6 +29,8 @@ EFFECT_FALLBACK_NAME = 'fallback'
 AUDIO_EXTENSION = '.ogg'
 FX_CHIP_SOUND_EXTENSION = '.wav'
 
+FX_CHIP_SOUND_VOL_PERCENT = 50
+
 class Debug:
     class State(Enum):
         INPUT = auto()
@@ -1399,7 +1401,7 @@ ver=167'''
                                         event.effect: int
                                         if event.button.is_fx() and event.effect is not None:
                                             letter = 'l' if event.button == Button.FX_L else 'r'
-                                            buffer.meta.append(f'fx-{letter}_se={event.effect}{FX_CHIP_SOUND_EXTENSION}')
+                                            buffer.meta.append(f'fx-{letter}_se={event.effect}{FX_CHIP_SOUND_EXTENSION};{FX_CHIP_SOUND_VOL_PERCENT}')
 
                     # Loop end stuff.
                     for cam_param in [x for x in ongoing_spcontroller_events.keys() if ongoing_spcontroller_events[x] is not None]:

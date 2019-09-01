@@ -1630,8 +1630,7 @@ def do_copy_jacket(vox, out_dir):
     global args
     global debug
 
-    src_jacket_token = f'jk_{str(vox.game_id).zfill(3)}_{str(vox.song_id).zfill(4)}_{vox.difficulty.to_jacket_ifs_numer()}_b'
-    src_jacket_path = args.jacket_dir + '/' + src_jacket_token + '_ifs/tex/' + src_jacket_token + '.png'
+    src_jacket_path = f'{args.jacket_dir}/{vox.song_id}_{vox.difficulty.to_jacket_ifs_numer()}.png'
 
     if os.path.exists(src_jacket_path):
         target_jacket_path = f'{out_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
@@ -1643,11 +1642,11 @@ def do_copy_jacket(vox, out_dir):
 
         while True:
             if fallback_jacket_diff_idx < 0:
-                print('> No jackets found for easier difficulties either. Leaving jacket blank.')
+                thread_print('No jackets found for easier difficulties either. Leaving jacket blank.')
                 debug.record(Debug.Level.WARNING, 'copy_jacket', 'could not find any jackets to copy')
                 return None
 
-            easier_jacket_path = f'{out_dir}/{fallback_jacket_diff_idx}.png'
+            easier_jacket_path = f'{args.jacket_dir}/{vox.song_id}_{fallback_jacket_diff_idx}.png'
             if os.path.exists(easier_jacket_path):
                 # We found the diff number with the jacket.
                 thread_print(f'Using jacket "{easier_jacket_path}".')

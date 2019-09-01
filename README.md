@@ -31,10 +31,9 @@ the same as the rest of the audio files.
 
 #### Jackets
 
-Jackets currently still are in the format outputted by ifstools. Each jacket goes
-in its own directory of the format `jk_<game id>_<song id>_<difficulty number>_b_ifs/tex/<base directory name without 
-the _ifs>.png`. The game ID and song ID should be padded to 3 and 4 digits, respectively. So, the jacket for song with 
-ID 632 (which is from game 3) for difficulty **EXH** would be `jk_003_0632_3_b_ifs/text/jk_003_0632_3_b.png`.
+Jackets belong in the directory specified by the `--jacket-dir` flag. Their names should follow the format 
+`<song id>_<difficulty index>`, where the `difficulty index` is its 1-indexed position in the difficulty order
+(**NOV**, **ADV**, **EXH**, **INF**, **MXM**). So, the **ADV** jacket for the song with ID 501 would be `501_2.png`.
 
 #### Metadata
 

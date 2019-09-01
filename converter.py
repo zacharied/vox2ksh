@@ -1,7 +1,6 @@
 from enum import Enum, auto
 from glob import glob
-from threading import Thread
-from typing import Union
+import threading
 
 from recordclass import dataobject
 from xml.etree import ElementTree
@@ -41,16 +40,28 @@ class Debug:
         ERROR = 'error'
 
     def __init__(self, exceptions_file="exceptions.txt"):
-        self.state = None
-        self.input_filename = None
-        self.output_filename = None
-        self.current_line_num = None
-        self.exceptions_count = {}
-        self._exceptions_file = open(exceptions_file, "w+")
+        self._state = {}
+        self._input_filename = {}
+        self._output_filename = {}
+        self._current_line_num = {}
+        self._exceptions_count = {}
+        self._exceptions_file = open(exceptions_file, 'w+')
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _get_threaded(member):
+        if threading.get_ident() not in member:
+            return None
+        return member[threading.get_ident()]
+
+    @staticmethod
+    def _set_threaded(member, value):
+        member[threading.get_ident()] = value
 
     def reset(self):
         for level in self.Level:
-            self.exceptions_count[level] = 0
+            if threading.get_ident() in self._exceptions_count:
+                self._exceptions_count[threading.get_ident()][level] = 0
 
     def close(self):
         self._exceptions_file.close()
@@ -59,11 +70,43 @@ class Debug:
         return self.input_filename if self.state == self.State.INPUT else self.output_filename
 
     def record(self, level, tag, message):
-        self.exceptions_count[level] += 1
+        self._lock.acquire()
+        if threading.get_ident() not in self._exceptions_count:
+            self._exceptions_count[threading.get_ident()] = {level: 0 for level in Debug.Level}
+        self._exceptions_count[threading.get_ident()][level] += 1
         print(f'{self.current_filename()}:{self.current_line_num}\n{level.value} / {tag}: {message}\n', file=self._exceptions_file)
+        self._lock.release()
 
     def record_last_exception(self, level=Level.WARNING, tag='python_exception', trace=False):
         self.record(level, tag, traceback.format_exc() if trace else sys.exc_info()[1])
+
+    @property
+    def state(self):
+        return Debug._get_threaded(self._state)
+    @state.setter
+    def state(self, value):
+        Debug._set_threaded(self._state, value)
+    @property
+    def input_filename(self):
+        return Debug._get_threaded(self._input_filename)
+    @input_filename.setter
+    def input_filename(self, value):
+        Debug._set_threaded(self._input_filename, value)
+    @property
+    def output_filename(self):
+        return Debug._get_threaded(self._output_filename)
+    @output_filename.setter
+    def output_filename(self, value):
+        Debug._set_threaded(self._output_filename, value)
+    @property
+    def current_line_num(self):
+        return Debug._get_threaded(self._current_line_num)
+    @current_line_num.setter
+    def current_line_num(self, value):
+        Debug._set_threaded(self._current_line_num, value)
+    @property
+    def exceptions_count(self):
+        return Debug._get_threaded(self._exceptions_count)
 
 def truncate(x, digits) -> float:
     stepper = 10.0 ** digits
@@ -281,7 +324,7 @@ class KshEffectDefine:
         """Generate an effect definition line from the old-style effect declaration."""
         global debug
 
-        define = cls.default_effect()
+        define = cls()
 
         if sound_id == 2:
             define.effect = KshEffect.RETRIGGER
@@ -306,8 +349,7 @@ class KshEffectDefine:
             define.main_param = '8' # TODO Tweak
         elif sound_id > 8:
             debug.record(Debug.Level.WARNING, 'fx_parse', f'old vox sound id {sound_id} unknown')
-            define.effect = KshEffect.FLANGER
-            define.main_param = '200'
+            define = cls.default_effect()
 
         return define
 
@@ -323,7 +365,7 @@ class KshEffectDefine:
     def from_effect_info_line(cls, line):
         splitted = line.replace('\t', '').split(',')
 
-        define = KshEffectDefine.default_effect()
+        define = KshEffectDefine()
 
         if splitted[0] == '1' or splitted[0] == '8':
             # TODO No way this is right
@@ -1465,6 +1507,87 @@ CASES = {
     'removed-data': (233, 'e')
 }
 
+thread_id_index = {}
+def thread_print(line):
+    if threading.get_ident() not in thread_id_index:
+        thread_id_index[threading.get_ident()] = len(thread_id_index) + 1
+    print(f'{thread_id_index[threading.get_ident()]}> {line}')
+
+def do_process_voxfiles(files):
+    global args
+    global debug
+
+    # Load source directory.
+    for vox_path in files:
+        debug.state = Debug.State.INPUT
+        debug.input_filename = vox_path
+        debug.output_filename = None
+        debug.reset()
+
+        # noinspection PyBroadException
+        try:
+            vox = Vox.from_file(vox_path)
+        except Exception:
+            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
+            continue
+
+        thread_print(f'Processing "{vox_path}": {str(vox)}')
+
+        # First try to parse the file.
+        try:
+            vox.parse()
+        except Exception as e:
+            thread_print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
+            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
+            continue
+
+        # Make the output directory.
+        song_dir = f'out/{vox.ascii}'
+        if not os.path.isdir(song_dir):
+            thread_print(f'Creating song directory "{song_dir}".')
+            os.mkdir(song_dir)
+
+        jacket_idx = None
+        infinite_audio = None
+        infinite_preview = None
+
+        # Copy media files over.
+        if args.do_media:
+            infinite_audio = do_copy_audio(vox, song_dir)
+            jacket_idx = do_copy_jacket(vox, song_dir)
+            infinite_preview = do_copy_preview(vox, song_dir)
+
+            # Copy FX chip sounds.
+            if len(vox.required_chip_sounds) > 0:
+                do_copy_fx_chip_sounds(vox, song_dir)
+
+        # Output the KSH chart.
+        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+
+        debug.output_filename = chart_path
+        debug.state = Debug.State.OUTPUT
+
+        if args.do_convert:
+            thread_print(f'Writing KSH data to "{chart_path}".')
+            with open(chart_path, "w+", encoding='utf-8') as ksh_file:
+                try:
+                    vox.write_to_ksh(jacket_idx=jacket_idx,
+                                     infinite_audio=infinite_audio,
+                                     infinite_preview=infinite_preview,
+                                     file=ksh_file)
+                except Exception as e:
+                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
+                    debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
+                    continue
+                if debug.exceptions_count is not None:
+                    exceptions = debug.exceptions_count
+                    thread_print(f'Finished conversion with {exceptions[Debug.Level.ABNORMALITY]} abnormalities, {exceptions[Debug.Level.WARNING]} warnings, and {exceptions[Debug.Level.ERROR]} errors.')
+                else:
+                    thread_print(f'Finished conversion with no issues.')
+        else:
+            thread_print(f'Skipping conversion step.')
+        vox.close()
+
 def do_copy_audio(vox, out_dir):
     """
     Search for and copy the track's audio file to the output directory.
@@ -1486,16 +1609,16 @@ def do_copy_audio(vox, out_dir):
     if vox.difficulty == Difficulty.INFINITE:
         src_audio_path_diff = f'{splitx(src_audio_path)[0]}_4i{splitx(src_audio_path)[1]}'
         if os.path.exists(src_audio_path_diff):
-            print(f'> Found difficulty-specific audio "{src_audio_path_diff}".')
+            thread_print(f'Found difficulty-specific audio "{src_audio_path_diff}".')
             src_audio_path = src_audio_path_diff
             target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
             using_inf_audio = True
 
     if not os.path.exists(target_audio_path):
-        print(f'> Copying audio file "{src_audio_path}" to song directory.')
+        thread_print(f'Copying audio file "{src_audio_path}" to song directory.')
         copyfile(src_audio_path, target_audio_path)
     else:
-        print(f'> Audio file "{target_audio_path}" already exists.')
+        thread_print(f'Audio file "{target_audio_path}" already exists.')
 
     return using_inf_audio
 
@@ -1512,10 +1635,10 @@ def do_copy_jacket(vox, out_dir):
 
     if os.path.exists(src_jacket_path):
         target_jacket_path = f'{out_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
-        print(f'> Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
+        thread_print(f'Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
         copyfile(src_jacket_path, target_jacket_path)
     else:
-        print(f'> Could not find jacket image file. Checking easier diffs.')
+        thread_print(f'Could not find jacket image file. Checking easier diffs.')
         fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
 
         while True:
@@ -1527,7 +1650,7 @@ def do_copy_jacket(vox, out_dir):
             easier_jacket_path = f'{out_dir}/{fallback_jacket_diff_idx}.png'
             if os.path.exists(easier_jacket_path):
                 # We found the diff number with the jacket.
-                print(f'> Using jacket "{easier_jacket_path}".')
+                thread_print(f'Using jacket "{easier_jacket_path}".')
                 return fallback_jacket_diff_idx
             fallback_jacket_diff_idx -= 1
 
@@ -1552,11 +1675,11 @@ def do_copy_preview(vox, out_dir):
         using_difficulty_preview = True
 
     if os.path.exists(output_path):
-        print(f'> Preview file "{output_path}" already exists.')
+        thread_print(f'Preview file "{output_path}" already exists.')
         return using_difficulty_preview
 
     if os.path.exists(preview_path):
-        print(f'> Copying preview to "{output_path}".')
+        thread_print(f'Copying preview to "{output_path}".')
         copyfile(preview_path, output_path)
     else:
         print('> No preview file found.')
@@ -1570,7 +1693,7 @@ def do_copy_fx_chip_sounds(vox, out_dir):
     global args
     global debug
 
-    print(f'> Copying FX chip sounds {vox.required_chip_sounds}.')
+    thread_print(f'Copying FX chip sounds {vox.required_chip_sounds}.')
     for sound in vox.required_chip_sounds:
         src_path = f'{args.fx_chip_sound_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
         target_path = f'{out_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
@@ -1651,92 +1774,23 @@ def main():
     for i, candidate in enumerate(candidates):
         groups[i % args.num_cores].append(candidate)
 
-    print(f'Beginning conversion across {args.num_cores} cores.')
-
-    core_num = 0
-    for i in range(1, len(groups)):
-        if os.fork() == 0:
-            core_num = i
-            break
+    threads = []
 
     global debug
-    debug = Debug(exceptions_file=f'exceptions_{core_num}.txt')
+    debug = Debug(exceptions_file=f'exceptions.txt')
 
-    # Load source directory.
-    for vox_path in groups[core_num]:
-        debug.state = Debug.State.INPUT
-        debug.input_filename = vox_path
-        debug.output_filename = None
-        debug.reset()
+    for i in range(args.num_cores):
+        threads.append(threading.Thread(target=do_process_voxfiles, args=(groups[i],), name=f'Thread-{i}'))
 
-        print(f'{vox_path}:')
-        # noinspection PyBroadException
-        try:
-            vox = Vox.from_file(vox_path)
-        except Exception:
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
-            continue
+    print(f'Performing conversion across {args.num_cores} threads.')
 
-        print(f'> Processing "{vox_path}": {str(vox)}')
+    for t in threads:
+        t.start()
 
-        # First try to parse the file.
-        try:
-            vox.parse()
-        except Exception as e:
-            print(f'> Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
-            continue
-
-        # Make the output directory.
-        song_dir = f'out/{vox.ascii}'
-        if not os.path.isdir(song_dir):
-            print(f'> Creating song directory "{song_dir}".')
-            os.mkdir(song_dir)
-
-        jacket_idx = None
-        infinite_audio = None
-        infinite_preview = None
-
-        # Copy media files over.
-        if args.do_media:
-            infinite_audio = do_copy_audio(vox, song_dir)
-            jacket_idx = do_copy_jacket(vox, song_dir)
-            infinite_preview = do_copy_preview(vox, song_dir)
-
-            # Copy FX chip sounds.
-            if len(vox.required_chip_sounds) > 0:
-                do_copy_fx_chip_sounds(vox, song_dir)
-
-        # Output the KSH chart.
-        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
-
-        debug.output_filename = chart_path
-        debug.state = Debug.State.OUTPUT
-
-        if args.do_convert:
-            print(f'> Writing KSH data to "{chart_path}".')
-            with open(chart_path, "w+", encoding='utf-8') as ksh_file:
-                try:
-                    vox.write_to_ksh(jacket_idx=jacket_idx,
-                                     infinite_audio=infinite_audio,
-                                     infinite_preview=infinite_preview,
-                                     file=ksh_file)
-                except Exception as e:
-                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                    debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
-                    continue
-                print(f'> Finished conversion with {debug.exceptions_count[Debug.Level.ABNORMALITY]} abnormalities, {debug.exceptions_count[Debug.Level.WARNING]} warnings, and {debug.exceptions_count[Debug.Level.ERROR]} errors.')
-        else:
-            print(f'> Skipping conversion step.')
-        vox.close()
+    for t in threads:
+        t.join()
 
     debug.close()
-
-    if core_num > 0:
-        exit(0)
-    else:
-        for _ in range(1, args.num_cores):
-            os.wait()
 
 if __name__ == '__main__':
     main()

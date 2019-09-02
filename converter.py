@@ -351,6 +351,8 @@ class KshEffectDefine:
             define.main_param = '8' # TODO Tweak
         elif sound_id > 8:
             debug.record(Debug.Level.WARNING, 'fx_parse', f'old vox sound id {sound_id} unknown')
+
+        if define.effect is None:
             define = cls.default_effect()
 
         return define

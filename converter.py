@@ -23,6 +23,7 @@ SLAM_TICKS = 4
 FX_CHIP_SOUND_COUNT = 14
 
 KSH_DEFAULT_FILTER_GAIN = 50
+KSH_DEFAULT_SLAM_VOL = 90
 
 EFFECT_FALLBACK_NAME = 'fallback'
 
@@ -1198,7 +1199,7 @@ plength=15000
 pfiltergain={KSH_DEFAULT_FILTER_GAIN}
 filtertype=peak
 chokkakuautovol=0
-chokkakuvol=50
+chokkakuvol={KSH_DEFAULT_SLAM_VOL}
 ver=167'''
 
         print(header, file=file)

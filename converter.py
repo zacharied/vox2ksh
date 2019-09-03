@@ -210,8 +210,13 @@ class SpcParam(Enum):
             return cls.AIRR_SCAX
         elif vox_name == 'Tilt':
             return cls.TILT
+        elif vox_name == 'LaneY':
+            return cls.LANE_Y
 
         raise ValueError(f'invalid camera param "{vox_name}"')
+
+    def is_state(self):
+        return self == self.LANE_Y
 
     def to_ksh_name(self):
         if self == self.ROT_X:
@@ -220,6 +225,8 @@ class SpcParam(Enum):
             return 'zoom_bottom'
         elif self == self.TILT:
             return 'tilt'
+        elif self == self.LANE_Y:
+            return 'lane_toggle'
         else:
             return None
 
@@ -231,6 +238,8 @@ class SpcParam(Enum):
             return int(val * -150.0)
         elif self == self.TILT:
             return truncate(val * -1.0, 1)
+        elif self == self.LANE_Y:
+            return int(val)
         return None
 
     ROT_X = auto()
@@ -239,6 +248,7 @@ class SpcParam(Enum):
     AIRL_SCAX = auto()
     AIRR_SCAX = auto()
     TILT = auto()
+    LANE_Y = auto()
 
     @classmethod
     def line_is_abnormal(cls, param, splitted):
@@ -853,6 +863,12 @@ class Vox:
             return next(iter([v for v in InfiniteVersion if v.value == int(self.get_metadata('inf_ver'))])).name.lower()
         return self.difficulty.name.lower()
 
+    def has_event(self, event_kind):
+        for v in self.events.values():
+            if event_kind in v:
+                return True
+        return False
+
     @staticmethod
     def has_action_event(event_map):
         """
@@ -1271,6 +1287,8 @@ ver=167'''
                                         debug.record(Debug.Level.WARNING, 'spnode_output', f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
                                     ongoing_spcontroller_events[cam_param] = SpControllerCountdown(event=event, time_left=event.duration)
                                     buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.start_param)}')
+                                elif cam_param.is_state():
+                                    buffer.meta.append(f'{cam_param.to_ksh_name()}={event.duration}')
 
                             elif kind == EventKind.TILTMODE:
                                 event: TiltMode
@@ -1408,7 +1426,7 @@ ver=167'''
 
                     # Loop end stuff.
                     for cam_param in [x for x in ongoing_spcontroller_events.keys() if ongoing_spcontroller_events[x] is not None]:
-                        if ongoing_spcontroller_events[cam_param].time_left == 0:
+                        if ongoing_spcontroller_events[cam_param].time_left == 0 and not cam_param.is_state():
                             # SpController node ended and there's not another one after.
                             event: CameraNode = ongoing_spcontroller_events[cam_param].event
                             buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.end_param)}')

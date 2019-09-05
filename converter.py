@@ -1,3 +1,4 @@
+#!/usr/bin/env python3.7
 from enum import Enum, auto
 from glob import glob
 import threading

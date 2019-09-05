@@ -1248,12 +1248,10 @@ ver=167'''
         for m in measure_iter:
             measure = m + 1
 
-            print(f'// {measure}', file=file)
+            now = Timing(measure, 1, 0)
 
             # Laser range resets every measure in ksh.
             laser_range = {LaserSide.LEFT: 1, LaserSide.RIGHT: 1}
-
-            now = Timing(measure, 1, 0)
 
             if now in self.events and EventKind.TIMESIG in self.events[now]:
                 current_timesig = self.events[now][EventKind.TIMESIG]
@@ -1262,6 +1260,8 @@ ver=167'''
             for b in range(current_timesig.top):
                 # Vox beats are also 1-indexed.
                 beat = b + 1
+
+                print(f'// #{measure},{beat}', file=file)
 
                 for o in range(int(float(TICKS_PER_BEAT) * (4 / current_timesig.bottom))):
                     # However, vox offsets are 0-indexed.

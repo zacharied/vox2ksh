@@ -618,11 +618,11 @@ class LaserSlam:
         return self.start.side
 
 class Difficulty(Enum):
-    NOVICE = 0, 'n', 'novice'
-    ADVANCED = 1, 'a', 'challenge'
-    EXHAUST = 2, 'e', 'extended'
-    INFINITE = 3, 'i', 'infinite'
-    MAXIMUM = 4, 'm', 'infinite'
+    NOVICE = 0, 'n', 'novice', 'nov'
+    ADVANCED = 1, 'a', 'challenge', 'adv'
+    EXHAUST = 2, 'e', 'extended', 'exh'
+    INFINITE = 3, 'i', 'infinite', 'inf'
+    MAXIMUM = 4, 'm', 'infinite', 'mxm'
 
     @classmethod
     def from_letter(cls, k):
@@ -648,11 +648,24 @@ class Difficulty(Enum):
     def to_jacket_ifs_numer(self):
         return self.value[0] + 1
 
+    def to_abbreviation(self):
+        return self.value[3]
+
 class InfiniteVersion(Enum):
-    INFINITE = 2
-    GRAVITY = 3
-    HEAVENLY = 4
-    VIVID = 5
+    INFINITE = 2, 'inf'
+    GRAVITY = 3, 'grv'
+    HEAVENLY = 4, 'hvn'
+    VIVID = 5, 'vvd'
+
+    @classmethod
+    def from_inf_ver(cls, num):
+        try:
+            return next(x for x in cls if x.value[0] == num)
+        except StopIteration:
+            return None
+
+    def to_abbreviation(self):
+        return self.value[1]
 
 class TiltMode(Enum):
     NORMAL = auto()
@@ -818,6 +831,10 @@ class Vox:
 
     def diff_token(self):
         return str(self.difficulty_idx) + self.difficulty.to_letter()
+
+    def diff_abbreviation(self):
+        return self.difficulty.to_abbreviation() if self.difficulty != Difficulty.INFINITE else \
+            InfiniteVersion.from_inf_ver(int(self.get_metadata('inf_ver'))).to_abbreviation()
 
     def get_metadata(self, tag, from_diff=False):
         if from_diff:
@@ -1171,13 +1188,12 @@ class Vox:
             f'track{AUDIO_EXTENSION}' if not infinite_audio else f'track_inf{AUDIO_EXTENSION}'
         preview_basename = '' if infinite_preview is None else \
             f'preview{AUDIO_EXTENSION}' if not infinite_preview else f'preview_inf{AUDIO_EXTENSION}'
-        jacket_basename = '' if jacket_idx is None else f'{jacket_idx}.png'
+        jacket_basename = '' if jacket_idx is None else f'jacket_{jacket_idx}.png'
 
         header = f'''// Source: {str(self.game_id).zfill(3)}_{str(self.song_id).zfill(4)}_{self.get_metadata("ascii")}_{self.diff_token()}.vox
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
-// Contact Nekoht#8008 on Discord for bug reports and assistance.
-// previewfile, realdifficulty, and the sort fields require a modified client to have any effect (the official releases 
-//   of USC and KSM do not have support for these fields).
+// previewfile and the sort fields require a modified client to have any effect (the upstream releases of USC and KSM do 
+//   not have support for these fields).
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
@@ -1186,7 +1202,6 @@ sortartist={self.get_metadata('artist_yomigana')}
 jacket={jacket_basename}
 illustrator={self.get_metadata('illustrator', True)}
 difficulty={self.difficulty.to_ksh_name()}
-realdifficulty={self.get_real_difficulty()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
 m={track_basename}
@@ -1405,7 +1420,7 @@ ver=167'''
                                         event.effect: int
                                         if event.button.is_fx() and event.effect is not None:
                                             letter = 'l' if event.button == Button.FX_L else 'r'
-                                            buffer.meta.append(f'fx-{letter}_se={event.effect}{FX_CHIP_SOUND_EXTENSION};{FX_CHIP_SOUND_VOL_PERCENT}')
+                                            buffer.meta.append(f'fx-{letter}_se=fxchip_{event.effect}{FX_CHIP_SOUND_EXTENSION};{FX_CHIP_SOUND_VOL_PERCENT}')
 
                     # Loop end stuff.
                     for cam_param in [x for x in ongoing_spcontroller_events.keys() if ongoing_spcontroller_events[x] is not None]:
@@ -1568,7 +1583,7 @@ def do_process_voxfiles(files):
                 do_copy_fx_chip_sounds(vox, song_dir)
 
         # Output the KSH chart.
-        chart_path = f'{song_dir}/{vox.difficulty.to_xml_name()}.ksh'
+        chart_path = f'{song_dir}/chart_{vox.diff_abbreviation()}.ksh'
 
         debug.output_filename = chart_path
         debug.state = Debug.State.OUTPUT
@@ -1639,7 +1654,7 @@ def do_copy_jacket(vox, out_dir):
     src_jacket_path = f'{args.jacket_dir}/{vox.song_id}_{vox.difficulty.to_jacket_ifs_numer()}.png'
 
     if os.path.exists(src_jacket_path):
-        target_jacket_path = f'{out_dir}/{str(vox.difficulty.to_jacket_ifs_numer())}.png'
+        target_jacket_path = f'{out_dir}/jacket_{str(vox.difficulty.to_jacket_ifs_numer())}.png'
         thread_print(f'Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
         copyfile(src_jacket_path, target_jacket_path)
     else:
@@ -1701,7 +1716,7 @@ def do_copy_fx_chip_sounds(vox, out_dir):
     thread_print(f'Copying FX chip sounds {vox.required_chip_sounds}.')
     for sound in vox.required_chip_sounds:
         src_path = f'{args.fx_chip_sound_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
-        target_path = f'{out_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
+        target_path = f'{out_dir}/fxchip_{sound}{FX_CHIP_SOUND_EXTENSION}'
         if os.path.exists(src_path):
             copyfile(src_path, target_path)
         else:

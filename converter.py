@@ -819,6 +819,7 @@ class Vox:
 
     def __init__(self):
         self.voxfile = None
+        self.source_file_name = None
         self.ascii = None
         self.game_id = 0
         self.song_id = 0
@@ -946,6 +947,7 @@ class Vox:
 
         file = open(path, 'r', encoding='cp932')
         parser.voxfile = file
+        parser.source_file_name = os.path.split(path)[-1]
 
         filename_array = os.path.basename(path).split('_')
         for file in glob(f'{args.db_dir}/*.xml'):
@@ -1063,7 +1065,8 @@ class Vox:
                     raise VoxParseError('bpm_info', 'unable to find end for stop event')
             else:
                 if self.stop_point is not None:
-                    self.events[self.stop_point.moment][EventKind.STOP] = now.diff(self.stop_point.moment, self.stop_point.timesig)
+                    self.events[self.stop_point.moment][EventKind.STOP] = now.diff(
+                        self.stop_point.moment, self.stop_point.timesig)
                     self.stop_point = None
                 if splitted[2] != '4' and splitted[2] != '4-':
                     debug.record(Debug.Level.ABNORMALITY, 'bpm_info', f'non-4 beat division in bpm info: {splitted[2]}')
@@ -1080,7 +1083,9 @@ class Vox:
 
         elif self.state == self.State.SOUND_ID:
             # The `define` handler takes care of this outside of this loop.
-            debug.record(Debug.Level.WARNING, 'vox_parse', f'({self.state}) line other than a #define was encountered in SOUND ID')
+            debug.record(Debug.Level.WARNING,
+                         'vox_parse',
+                         f'({self.state}) line other than a #define was encountered in SOUND ID')
 
         elif self.state == self.State.TAB_EFFECT:
             # TODO Tab effects
@@ -1121,7 +1126,8 @@ class Vox:
 
             if param is not None:
                 try:
-                    self.events[now][(EventKind.SPCONTROLLER, param)] = CameraNode(float(splitted[4]), float(splitted[5]), int(splitted[3]))
+                    self.events[now][(EventKind.SPCONTROLLER, param)] = CameraNode(
+                        float(splitted[4]), float(splitted[5]), int(splitted[3]))
                 except ValueError:
                     # Just record it as an abnormality.
                     pass
@@ -1196,17 +1202,23 @@ class Vox:
                                 # It's a regular effect.
                                 fx_data = int(splitted[2]) - 2
                             elif int(splitted[2]) == 254:
-                                debug.record(Debug.Level.WARNING, 'button_fx', 'reverb effect is unimplemented, using fallback')
+                                debug.record(Debug.Level.WARNING,
+                                             'button_fx',
+                                             'reverb effect is unimplemented, using fallback')
                                 fx_data = -1
                             else:
-                                debug.record(Debug.Level.WARNING, 'button_fx', 'out of bounds fx index for FX hold, using fallback')
+                                debug.record(Debug.Level.WARNING,
+                                             'button_fx',
+                                             'out of bounds fx index for FX hold, using fallback')
                                 fx_data = -1
                     else:
                         # Fx chip, check for sound.
                         if self.vox_version >= 4:
                             sound_id = int(splitted[2])
                             if sound_id != -1 and sound_id != 255 and (sound_id >= FX_CHIP_SOUND_COUNT or sound_id < 0):
-                                debug.record(Debug.Level.WARNING, 'chip_sound_parse', f'unhandled chip sound id {sound_id}')
+                                debug.record(Debug.Level.WARNING,
+                                             'chip_sound_parse',
+                                             f'unhandled chip sound id {sound_id}')
                             elif 1 <= sound_id < FX_CHIP_SOUND_COUNT:
                                 fx_data = sound_id
                                 self.required_chip_sounds.add(sound_id)
@@ -1224,7 +1236,7 @@ class Vox:
             f'preview{AUDIO_EXTENSION}' if not infinite_preview else f'preview_inf{AUDIO_EXTENSION}'
         jacket_basename = '' if jacket_idx is None else f'jacket_{jacket_idx}.png'
 
-        header = f'''// Source: {str(self.game_id).zfill(3)}_{str(self.song_id).zfill(4)}_{self.get_metadata("ascii")}_{self.diff_token()}.vox
+        header = f'''// Source: {self.source_file_name}
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
 // previewfile and the sort fields require a modified client to have any effect (the upstream releases of USC and KSM do 
 //   not have support for these fields).

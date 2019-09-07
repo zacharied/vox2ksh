@@ -1785,29 +1785,27 @@ def main():
 
     candidates = []
 
-    for dirpath, dirnames, filenames in os.walk(args.vox_dir):
-        for filename in filter(lambda n: n.endswith('.vox'), filenames):
-            import re
-            fullpath = pjoin(dirpath, filename)
-            if (args.song_id is None and args.testcase is None) or \
-                    (args.song_id is not None and f'_{args.song_id.zfill(4)}_' in filename) or \
-                    (args.testcase is not None and re.match(rf'^.*00[1-4]_0*{CASES[args.testcase][0]}_.*{CASES[args.testcase][1]}\.vox$', fullpath)):
-                if args.song_difficulty is None or splitx(filename)[0][-1] == args.song_difficulty:
-                    # See if this is overriding an earlier game's version of the chart.
-                    try:
-                        prev: str = next(filter(lambda n: n.split('/')[-1].split('_')[1] == filename.split('_')[1] and splitx(n)[0][-1] == splitx(filename)[0][-1], candidates))
-                        if int(prev.split('/')[-1].split('_')[0]) < int(filename.split('_')[0]):
-                            candidates.remove(prev)
-                        else:
-                            continue
-                    except StopIteration:
-                        # Not clashing with anything.
-                        pass
-                    except IndexError:
-                        # Malformed file name.
-                        pass
+    for filename in glob(f'{args.vox_dir}/*.vox'):
+        import re
+        if (args.song_id is None and args.testcase is None) or \
+                (args.song_id is not None and f'_{args.song_id.zfill(4)}_' in filename) or \
+                (args.testcase is not None and re.match(rf'^.*00[1-4]_0*{CASES[args.testcase][0]}_.*{CASES[args.testcase][1]}\.vox$', filename)):
+            if args.song_difficulty is None or splitx(filename)[0][-1] == args.song_difficulty:
+                # See if this is overriding an earlier game's version of the chart.
+                try:
+                    prev: str = next(filter(lambda n: n.split('_')[1] == filename.split('_')[1] and splitx(n)[0][-1] == splitx(filename)[0][-1], candidates))
+                    if int(prev.split('_')[1]) < int(filename.split('_')[1]):
+                        candidates.remove(prev)
+                    else:
+                        continue
+                except StopIteration:
+                    # Not clashing with anything.
+                    pass
+                except (IndexError, ValueError):
+                    # Malformed file name.
+                    pass
 
-                    candidates.append(pjoin(dirpath, filename))
+                candidates.append(filename)
 
     print('The following files will be processed:')
     for f in candidates:

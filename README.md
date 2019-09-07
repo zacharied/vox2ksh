@@ -9,9 +9,9 @@ The paths of the chart files and associated data must match the following requir
 #### Charts
 
 These should be in the format given by running [ifstools](https://github.com/mon/ifstools) on the game's vox IFS files.
-They should go inside the directory given by the `VOX_ROOT` constant. If done correctly, there will be a number of
-`vox_XX_ifs` directories where `XX` is the number from the IFS folder. Each directory will contain a number of `.vox` 
-files. Charts go in the `data` directory.
+Upon extraction, the files will be in a number of `vox_<xx>_ifs` directories. Move all vox files within those 
+directories into the one specified by the `--vox-dir` flag. There should be no subdirectories within that directory; a 
+path to a chart would be `<vox-dir>/<a chart>.vox`.
 
 #### Songs
 

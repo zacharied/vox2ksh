@@ -1686,9 +1686,11 @@ def do_copy_jacket(vox, out_dir):
                 return None
 
             easier_jacket_path = f'{args.jacket_dir}/{vox.song_id}_{fallback_jacket_diff_idx}.png'
+            target_jacket_path = f'{out_dir}/jacket_{fallback_jacket_diff_idx}.png'
             if os.path.exists(easier_jacket_path):
                 # We found the diff number with the jacket.
                 thread_print(f'Using jacket "{easier_jacket_path}".')
+                copyfile(easier_jacket_path, target_jacket_path)
                 return fallback_jacket_diff_idx
             fallback_jacket_diff_idx -= 1
 

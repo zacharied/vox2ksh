@@ -79,7 +79,8 @@ class Debug:
         if threading.get_ident() not in self._exceptions_count:
             self._exceptions_count[threading.get_ident()] = {level: 0 for level in Debug.Level}
         self._exceptions_count[threading.get_ident()][level] += 1
-        print(f'{self.current_filename()}:{self.current_line_num}\n{level.value} / {tag}: {message}\n', file=self._exceptions_file)
+        print(f'{self.current_filename()}:{self.current_line_num}\n{level.value} / {tag}: {message}\n',
+              file=self._exceptions_file)
         self._lock.release()
 
     def record_last_exception(self, level=Level.WARNING, tag='python_exception', trace=False):
@@ -905,25 +906,15 @@ class Vox:
                 if 2 <= kind[1] <= 7 or type(event_map[kind]) is LaserSlam:
                     return True
 
-    def time_iter(self, start: Timing, timesig: TimeSignature, condition_event=None, condition_timing=None):
+    def time_iter(self, start: Timing, timesig: TimeSignature):
         """
         Returns an iterator for the timing and event (or None) for each tick of the chart
         :param start: the Timing moment to start iterating from
         :param timesig: the timesig to start in
-        :param condition_event: a function that takes one argument, the event, and returns true to stop iterating there
-        :param condition_timing: a function that takes one argument, the timing, and returns true to stop iteration there
         :return: the iterator
         """
         if start.offset > timesig.ticks_per_beat():
             raise ValueError(f'start offset ({start.offset}) greater than ticks per beat ({timesig.ticks_per_beat()})')
-
-        if condition_timing is None:
-            if self.end is None:
-                # When parsing a Stop event, the end of the chart may not yet be parsed, so we make an assumption for
-                # how long a chart could possibly be.
-                condition_timing = lambda t: t.measure > MAX_MEASURES
-            else:
-                condition_timing = lambda t: t == self.end
 
         last_timesig = timesig
 
@@ -942,14 +933,6 @@ class Vox:
 
                 for offset in range(0, last_timesig.ticks_per_beat()):
                     now = Timing(measure, beat, offset)
-
-                    if now in self.events and condition_event is not None:
-                        if condition_event(self.events[now]):
-                            return
-
-                    if condition_timing is not None:
-                        if condition_timing(now):
-                            return
 
                     yield (now, self.events[now] if now in self.events else None)
 
@@ -1064,11 +1047,18 @@ class Vox:
                 self.stop_point = StopEvent()
                 self.stop_point.moment = now
                 last_timesig = None
+
                 for t, e in self.time_iter(Timing(1, 1, 0), self.events[Timing(1, 1, 0)][EventKind.TIMESIG]):
+                    if t.measure > MAX_MEASURES:
+                        # When parsing a Stop event, the end of the chart may not yet be parsed, so we make an
+                        # assumption for how long a chart could possibly be.
+                        break
+
                     if e is not None and EventKind.TIMESIG in e:
                         last_timesig = e[EventKind.TIMESIG]
                     if e is not None and t == now:
                         self.stop_point.timesig = last_timesig
+
                 if self.stop_point.timesig is None:
                     raise VoxParseError('bpm_info', 'unable to find end for stop event')
             else:

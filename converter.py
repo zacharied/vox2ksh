@@ -1558,74 +1558,77 @@ def do_process_voxfiles(files):
 
     # Load source directory.
     for vox_path in files:
-        debug.state = Debug.State.INPUT
-        debug.input_filename = vox_path
-        debug.output_filename = None
-        debug.reset()
-
-        # noinspection PyBroadException
         try:
-            vox = Vox.from_file(vox_path)
-        except Exception:
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
-            continue
+            debug.state = Debug.State.INPUT
+            debug.input_filename = vox_path
+            debug.output_filename = None
+            debug.reset()
 
-        thread_print(f'Processing "{vox_path}": {str(vox)}')
+            # noinspection PyBroadException
+            try:
+                vox = Vox.from_file(vox_path)
+            except Exception:
+                debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
+                continue
 
-        # First try to parse the file.
-        try:
-            vox.parse()
+            thread_print(f'Processing "{vox_path}": {str(vox)}')
+
+            # First try to parse the file.
+            try:
+                vox.parse()
+            except Exception as e:
+                thread_print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
+                debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
+                continue
+
+            # Make the output directory.
+            song_dir = f'out/{vox.ascii}'
+            if not os.path.isdir(song_dir):
+                thread_print(f'Creating song directory "{song_dir}".')
+                os.mkdir(song_dir)
+
+            jacket_idx = None
+            infinite_audio = None
+            infinite_preview = None
+
+            # Copy media files over.
+            if args.do_media:
+                infinite_audio = do_copy_audio(vox, song_dir)
+                jacket_idx = do_copy_jacket(vox, song_dir)
+                infinite_preview = do_copy_preview(vox, song_dir)
+
+                # Copy FX chip sounds.
+                if len(vox.required_chip_sounds) > 0:
+                    do_copy_fx_chip_sounds(vox, song_dir)
+
+            # Output the KSH chart.
+            chart_path = f'{song_dir}/chart_{vox.diff_abbreviation()}.ksh'
+
+            debug.output_filename = chart_path
+            debug.state = Debug.State.OUTPUT
+
+            if args.do_convert:
+                thread_print(f'Writing KSH data to "{chart_path}".')
+                with open(chart_path, "w+", encoding='utf-8') as ksh_file:
+                    try:
+                        vox.write_to_ksh(jacket_idx=jacket_idx,
+                                         infinite_audio=infinite_audio,
+                                         infinite_preview=infinite_preview,
+                                         file=ksh_file)
+                    except Exception as e:
+                        print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
+                        debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
+                        continue
+                    if debug.exceptions_count is not None:
+                        exceptions = debug.exceptions_count
+                        thread_print(f'Finished conversion with {exceptions[Debug.Level.ABNORMALITY]} abnormalities, {exceptions[Debug.Level.WARNING]} warnings, and {exceptions[Debug.Level.ERROR]} errors.')
+                    else:
+                        thread_print(f'Finished conversion with no issues.')
+            else:
+                thread_print(f'Skipping conversion step.')
+            vox.close()
         except Exception as e:
-            thread_print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
-            debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
-            continue
-
-        # Make the output directory.
-        song_dir = f'out/{vox.ascii}'
-        if not os.path.isdir(song_dir):
-            thread_print(f'Creating song directory "{song_dir}".')
-            os.mkdir(song_dir)
-
-        jacket_idx = None
-        infinite_audio = None
-        infinite_preview = None
-
-        # Copy media files over.
-        if args.do_media:
-            infinite_audio = do_copy_audio(vox, song_dir)
-            jacket_idx = do_copy_jacket(vox, song_dir)
-            infinite_preview = do_copy_preview(vox, song_dir)
-
-            # Copy FX chip sounds.
-            if len(vox.required_chip_sounds) > 0:
-                do_copy_fx_chip_sounds(vox, song_dir)
-
-        # Output the KSH chart.
-        chart_path = f'{song_dir}/chart_{vox.diff_abbreviation()}.ksh'
-
-        debug.output_filename = chart_path
-        debug.state = Debug.State.OUTPUT
-
-        if args.do_convert:
-            thread_print(f'Writing KSH data to "{chart_path}".')
-            with open(chart_path, "w+", encoding='utf-8') as ksh_file:
-                try:
-                    vox.write_to_ksh(jacket_idx=jacket_idx,
-                                     infinite_audio=infinite_audio,
-                                     infinite_preview=infinite_preview,
-                                     file=ksh_file)
-                except Exception as e:
-                    print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                    debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
-                    continue
-                if debug.exceptions_count is not None:
-                    exceptions = debug.exceptions_count
-                    thread_print(f'Finished conversion with {exceptions[Debug.Level.ABNORMALITY]} abnormalities, {exceptions[Debug.Level.WARNING]} warnings, and {exceptions[Debug.Level.ERROR]} errors.')
-                else:
-                    thread_print(f'Finished conversion with no issues.')
-        else:
-            thread_print(f'Skipping conversion step.')
-        vox.close()
+            debug.record_last_exception(Debug.Level.ERROR, 'other', f'an error occurred: {str(e)}')
 
 def do_copy_audio(vox, out_dir):
     """

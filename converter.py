@@ -965,7 +965,6 @@ class Vox:
         parser.voxfile = file
 
         filename_array = os.path.basename(path).split('_')
-        # TODO Support multiple music_db.xml ?
         for file in glob(f'{args.db_dir}/*.xml'):
             with open(file, encoding='cp932') as db:
                 try:
@@ -980,6 +979,7 @@ class Vox:
 
                 if len(tree) > 0:
                     parser.metadata = tree[0]
+                    break
 
         if parser.metadata is None:
             raise VoxLoadError(parser.voxfile.name, f'unable to find metadata for song')

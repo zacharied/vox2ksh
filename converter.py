@@ -14,7 +14,6 @@ import sys, os
 import argparse
 
 from os.path import splitext as splitx
-from os.path import join as pjoin
 
 # Ticks per a beat of /4 time
 TICKS_PER_BEAT = 48
@@ -32,6 +31,8 @@ AUDIO_EXTENSION = '.ogg'
 FX_CHIP_SOUND_EXTENSION = '.wav'
 
 FX_CHIP_SOUND_VOL_PERCENT = 50
+
+MAX_MEASURES = 999
 
 class Debug:
     class State(Enum):
@@ -701,12 +702,17 @@ class TiltMode(Enum):
             return 'keep_bigger'
         return None
 
+class StopEvent:
+    moment: Timing
+    timesig: TimeSignature
+
 class EventKind(Enum):
     TRACK = auto()
     TIMESIG = auto()
     BPM = auto()
     TILTMODE = auto()
     SPCONTROLLER = auto()
+    STOP = auto()
 
 class KshLineBuf:
     """ Represents a single line of notes in KSH (along with effect assignment lines) """
@@ -827,6 +833,7 @@ class Vox:
 
         self.state = None
         self.state_track = 0
+        self.stop_point = None
 
         self.metadata: ElementTree = None
         self.difficulty = None
@@ -911,7 +918,12 @@ class Vox:
             raise ValueError(f'start offset ({start.offset}) greater than ticks per beat ({timesig.ticks_per_beat()})')
 
         if condition_timing is None:
-            condition_timing = lambda t: t == self.end
+            if self.end is None:
+                # When parsing a Stop event, the end of the chart may not yet be parsed, so we make an assumption for
+                # how long a chart could possibly be.
+                condition_timing = lambda t: t.measure > MAX_MEASURES
+            else:
+                condition_timing = lambda t: t == self.end
 
         last_timesig = timesig
 
@@ -1047,9 +1059,25 @@ class Vox:
                 debug.record_last_exception(Debug.Level.ABNORMALITY, tag='bpm_parse')
 
         elif self.state == self.State.BPM_INFO:
-            if splitted[2] != '4':
-                debug.record(Debug.Level.ABNORMALITY, 'bpm_info', f'non-4 beat division in bpm info: {splitted[2]}')
-            self.events[now][EventKind.BPM] = float(splitted[1])
+            if splitted[2].endswith('-'):
+                # There is a stop.
+                self.stop_point = StopEvent()
+                self.stop_point.moment = now
+                last_timesig = None
+                for t, e in self.time_iter(Timing(1, 1, 0), self.events[Timing(1, 1, 0)][EventKind.TIMESIG]):
+                    if e is not None and EventKind.TIMESIG in e:
+                        last_timesig = e[EventKind.TIMESIG]
+                    if e is not None and t == now:
+                        self.stop_point.timesig = last_timesig
+                if self.stop_point.timesig is None:
+                    raise VoxParseError('bpm_info', 'unable to find end for stop event')
+            else:
+                if self.stop_point is not None:
+                    self.events[self.stop_point.moment][EventKind.STOP] = now.diff(self.stop_point.moment, self.stop_point.timesig)
+                    self.stop_point = None
+                if splitted[2] != '4' and splitted[2] != '4-':
+                    debug.record(Debug.Level.ABNORMALITY, 'bpm_info', f'non-4 beat division in bpm info: {splitted[2]}')
+                self.events[now][EventKind.BPM] = float(splitted[1])
 
         elif self.state == self.State.TILT_INFO:
             try:
@@ -1294,6 +1322,10 @@ ver=167'''
                             elif kind == EventKind.BPM:
                                 event: float
                                 buffer.meta.append(f't={str(event).rstrip("0").rstrip(".").strip()}')
+
+                            elif kind == EventKind.STOP:
+                                event: int
+                                buffer.meta.append(f'stop={event}')
 
                             elif type(kind) is tuple and kind[0] == EventKind.SPCONTROLLER:
                                 event: CameraNode
@@ -1543,7 +1575,8 @@ CASES = {
     'tilt-mode': (34, 'i'),
     'spc-tilt': (71, 'i'),
     'wtf': (1361, 'm'),
-    'removed-data': (233, 'e')
+    'removed-data': (233, 'e'),
+    'timesig-stop': (1148, 'm')
 }
 
 thread_id_index = {}

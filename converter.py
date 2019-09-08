@@ -960,7 +960,7 @@ class Vox:
                 except ValueError:
                     raise VoxLoadError(parser.voxfile.name, f'unable to parse difficulty from file name "{path}"')
 
-                tree = ElementTree.fromstring(db.read()).findall('''.//*[@id='{}']'''.format(parser.song_id))
+                tree = ElementTree.fromstring(db.read()).findall('''.//music[@id='{}']'''.format(parser.song_id))
 
                 if len(tree) > 0:
                     parser.metadata = tree[0]

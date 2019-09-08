@@ -4,7 +4,16 @@ This converts `.vox` charts to `.ksh` charts. If you don't know what those are t
 
 ## Prerequisites
 
-The paths of the chart files and associated data must match the following requirements.
+The paths of the chart files and associated data must match the following requirements. For audio files, the 
+`extractor.py` script in this repo will extract the data in the correct naming convention. Note that `extractor.py` 
+will extract the songs to the `.wav` format; you must convert them to `.ogg`. An example:
+
+```bash
+# In the directory with the output WAVs for previews or tracks.
+for f in *.wav; do ffmpeg -i "$f" -q:a 7 "${f%wav}ogg"; done
+```
+
+Obviously this requires `ffmpeg` to be installed.
 
 #### Charts
 
@@ -43,8 +52,8 @@ Place the `music_db.xml` in the `data` directory. It can be found in the same di
 
 Just running `converter.py` with Python 3 should begin converting the charts. The `--testcase` argument can be used to
 convert a specific testcase (run it with no argument to list available testcases). The `--song-id` argument can be used
-to convert the song with the specified ID.
+to convert the song with the specified ID. Run `converter.py -h` to see all options, including their short forms.
 
-## Disclaimer
+## Other
 
 This software is provided for educational purposes only.

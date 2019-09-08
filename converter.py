@@ -1239,7 +1239,7 @@ class Vox:
         header = f'''// Source: {self.source_file_name}
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
 // previewfile and the sort fields require a modified client to have any effect (the upstream releases of USC and KSM do 
-//   not have support for these fields).
+//   not have support for these fields). https://github.com/zacharied/unnamed-sdvx-clone
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}

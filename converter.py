@@ -1791,7 +1791,7 @@ debug = None
 def main():
     global args
     argparser = argparse.ArgumentParser(description='Convert vox to ksh')
-    argparser.add_argument('-c', '--num-cores', default=3, type=int)
+    argparser.add_argument('-c', '--num-cores', default=1, type=int)
     argparser.add_argument('-t', '--testcase')
     argparser.add_argument('-i', '--song-id')
     argparser.add_argument('-d', '--song-difficulty')

@@ -950,7 +950,7 @@ class Vox:
         parser.source_file_name = os.path.split(path)[-1]
 
         filename_array = os.path.basename(path).split('_')
-        for file in glob(f'{args.db_dir}/*.xml'):
+        for file in glob(f'{args.db_dir}/*.xml') if args.multi_db else [f'{args.db_dir}/music_db.xml']:
             with open(file, encoding='cp932') as db:
                 try:
                     parser.game_id = int(filename_array[0])
@@ -1797,6 +1797,7 @@ def main():
     argparser.add_argument('-d', '--song-difficulty')
     argparser.add_argument('-n', '--no-media', action='store_false', dest='do_media')
     argparser.add_argument('-m', '--no-convert', action='store_false', dest='do_convert')
+    argparser.add_argument('-x', '--no-merge-db', action='store_false', dest='multi_db')
     argparser.add_argument('-V', '--vox-dir', default='D:/SDVX-Extract/vox')
     argparser.add_argument('-D', '--db-dir', default='D:/SDVX-Extract/music_db')
     argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')

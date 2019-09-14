@@ -1226,14 +1226,15 @@ class Vox:
                 self.events[now][(EventKind.TRACK, self.state_track)] = ButtonPress(button, int(splitted[1]), fx_data)
 
 
-    def write_to_ksh(self, jacket_idx=None, infinite_audio=False, infinite_preview=False, file=sys.stdout):
+    def write_to_ksh(self, jacket_idx=None, using_difficulty_audio=None, using_difficulty_preview=False, file=sys.stdout):
         global args
         global debug
 
-        track_basename = '' if infinite_audio is None else \
-            f'track{AUDIO_EXTENSION}' if not infinite_audio else f'track_inf{AUDIO_EXTENSION}'
-        preview_basename = '' if infinite_preview is None else \
-            f'preview{AUDIO_EXTENSION}' if not infinite_preview else f'preview_inf{AUDIO_EXTENSION}'
+        track_basename = f'track_{self.difficulty.to_abbreviation()}{AUDIO_EXTENSION}' if using_difficulty_audio else \
+            f'track{AUDIO_EXTENSION}'
+        preview_basename = \
+            f'preview_{self.difficulty.to_abbreviation()}{AUDIO_EXTENSION}' if using_difficulty_preview else \
+            f'preview{AUDIO_EXTENSION}'
         jacket_basename = '' if jacket_idx is None else f'jacket_{jacket_idx}.png'
 
         header = f'''// Source: {self.source_file_name}
@@ -1623,14 +1624,14 @@ def do_process_voxfiles(files):
                 os.mkdir(song_dir)
 
             jacket_idx = None
-            infinite_audio = None
-            infinite_preview = None
+            using_difficulty_audio = None
+            using_difficulty_preview = None
 
             # Copy media files over.
             if args.do_media:
-                infinite_audio = do_copy_audio(vox, song_dir)
+                using_difficulty_audio = do_copy_audio(vox, song_dir)
+                using_difficulty_preview = do_copy_preview(vox, song_dir)
                 jacket_idx = do_copy_jacket(vox, song_dir)
-                infinite_preview = do_copy_preview(vox, song_dir)
 
                 # Copy FX chip sounds.
                 if len(vox.required_chip_sounds) > 0:
@@ -1647,8 +1648,8 @@ def do_process_voxfiles(files):
                 with open(chart_path, "w+", encoding='utf-8') as ksh_file:
                     try:
                         vox.write_to_ksh(jacket_idx=jacket_idx,
-                                         infinite_audio=infinite_audio,
-                                         infinite_preview=infinite_preview,
+                                         using_difficulty_audio=using_difficulty_audio,
+                                         using_difficulty_preview=using_difficulty_preview,
                                          file=ksh_file)
                     except Exception as e:
                         print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
@@ -1668,28 +1669,26 @@ def do_process_voxfiles(files):
 def do_copy_audio(vox, out_dir):
     """
     Search for and copy the track's audio file to the output directory.
-    :return: True if the track is using an `_inf` audio file, False otherwise.
+    :return: True if the audio file is difficulty-specific, otherwise False.
     """
     global args
     global debug
 
+    using_difficulty_audio = False
+
     target_audio_path = f'{out_dir}/track.ogg'
 
-    src_audio_path = f'{args.audio_dir}/{vox.song_id}{AUDIO_EXTENSION}'
+    src_audio_path = f'{args.audio_dir}/{vox.song_id}_{vox.difficulty.to_abbreviation()}{AUDIO_EXTENSION}'
 
     if not os.path.exists(src_audio_path):
-        debug.record(Debug.Level.WARNING, 'audio_copy', 'no audio file found')
-        return None
+        src_audio_path = f'{args.audio_dir}/{vox.song_id}{AUDIO_EXTENSION}'
+    else:
+        using_difficulty_audio = True
+        target_audio_path = f'{out_dir}/track_{vox.difficulty.to_abbreviation()}{AUDIO_EXTENSION}'
+        thread_print(f'Found difficulty-specific audio "{src_audio_path}".')
 
-    using_inf_audio = False
-
-    if vox.difficulty == Difficulty.INFINITE:
-        src_audio_path_diff = f'{splitx(src_audio_path)[0]}_inf{splitx(src_audio_path)[1]}'
-        if os.path.exists(src_audio_path_diff):
-            thread_print(f'Found difficulty-specific audio "{src_audio_path_diff}".')
-            src_audio_path = src_audio_path_diff
-            target_audio_path = f'{splitx(target_audio_path)[0]}_inf{splitx(target_audio_path)[1]}'
-            using_inf_audio = True
+    if not os.path.exists(src_audio_path):
+        raise VoxLoadError('no audio file found')
 
     if not os.path.exists(target_audio_path):
         thread_print(f'Copying audio file "{src_audio_path}" to song directory.')
@@ -1697,7 +1696,7 @@ def do_copy_audio(vox, out_dir):
     else:
         thread_print(f'Audio file "{target_audio_path}" already exists.')
 
-    return using_inf_audio
+    return using_difficulty_audio
 
 def do_copy_jacket(vox, out_dir):
     """
@@ -1744,12 +1743,12 @@ def do_copy_preview(vox, out_dir):
 
     output_path = f'{out_dir}/preview{AUDIO_EXTENSION}'
     preview_path = f'{args.preview_dir}/{vox.song_id}{AUDIO_EXTENSION}'
-    diff_preview_path = f'{splitx(preview_path)[0]}_{vox.diff_token()}{AUDIO_EXTENSION}'
+    diff_preview_path = f'{splitx(preview_path)[0]}_{vox.difficulty.to_abbreviation()}{AUDIO_EXTENSION}'
     using_difficulty_preview = False
 
     if os.path.exists(diff_preview_path):
         preview_path = diff_preview_path
-        output_path = f'{splitx(output_path)[0]}_{vox.diff_token()}{splitx(output_path)[1]}'
+        output_path = f'{splitx(output_path)[0]}_{vox.difficulty.to_abbreviation()}{splitx(output_path)[1]}'
         using_difficulty_preview = True
 
     if os.path.exists(output_path):

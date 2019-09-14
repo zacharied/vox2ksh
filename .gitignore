@@ -5,3 +5,5 @@ data/
 out/
 exceptions.txt
 issues.txt
+
+README_inc_*.txt

@@ -1213,7 +1213,7 @@ class Vox:
                                 fx_data = -1
                     else:
                         # Fx chip, check for sound.
-                        if self.vox_version >= 4:
+                        if self.vox_version >= 9:
                             sound_id = int(splitted[2])
                             if sound_id != -1 and sound_id != 255 and (sound_id >= FX_CHIP_SOUND_COUNT or sound_id < 0):
                                 debug.record(Debug.Level.WARNING,

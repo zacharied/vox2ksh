@@ -23,7 +23,7 @@ SLAM_TICKS = 4
 FX_CHIP_SOUND_COUNT = 14
 
 KSH_DEFAULT_FILTER_GAIN = 50
-KSH_DEFAULT_SLAM_VOL = 90
+KSH_DEFAULT_SLAM_VOL = 82
 
 EFFECT_FALLBACK_NAME = 'fallback'
 
@@ -331,8 +331,12 @@ class KshEffectDefine:
             param_str += f';{k}={v}'
         return f'#define_fx {index} type={self.effect.to_ksh_simple_name()}{param_str}'
 
-    def fx_change(self, index):
-        extra = f';{self.main_param}' if self.main_param is not None else ''
+    def fx_change(self, index, duration=0):
+        if self.effect == KshEffect.TAPESTOP:
+            # Math lol
+            extra = f';{int(2500 / (duration + 10))}'
+        else:
+            extra = f';{self.main_param}' if self.main_param is not None else ''
         return f'{index}{extra}'
 
     @classmethod
@@ -441,12 +445,8 @@ class KshEffectDefine:
             # Tape stop
             define.effect = KshEffect.TAPESTOP
             define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
-            speed = float(splitted[3]) * float(splitted[2]) * 9.8125
-            if speed > 50:
-                speed = 50
-            else:
-                speed = int(speed)
-            define.main_param = speed
+            # This will be overridden per note based on the note's length.
+            define.main_param = 35
             define.params['speed'] = f'{define.main_param}%'
 
         elif splitted[0] == '5':
@@ -1459,7 +1459,7 @@ ver=167'''
                                             letter = 'l' if event.button == Button.FX_L else 'r'
                                             try:
                                                 if type(event.effect) is int:
-                                                    effect_string = self.effect_defines[event.effect].fx_change(event.effect) if event.effect >= 0 else self.effect_fallback.fx_change(EFFECT_FALLBACK_NAME)
+                                                    effect_string = self.effect_defines[event.effect].fx_change(event.effect, duration=event.duration) if event.effect >= 0 else self.effect_fallback.fx_change(EFFECT_FALLBACK_NAME)
                                                 else:
                                                     effect_string = event.effect[0].to_ksh_name(event.effect[1])
                                                 buffer.meta.append(f'fx-{letter}={effect_string}')

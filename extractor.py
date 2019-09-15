@@ -7,23 +7,23 @@ from shutil import copyfile, rmtree
 
 # Replace this with the location of your game's `contents` directory.
 # Example:
-GAME_DIR = 'G:/Games/SDVX/contents'
-#GAME_DIR = ''
+# GAME_DIR = 'G:/Games/SDVX/contents'
+GAME_DIR = ''
 
 # Two-element arrays: the first element is the location of the data folder. The second is a boolean: it should be True
 # if the directory is from a layeredFS mod, otherwise False.
 # Example:
-DATA_DIRS = [['data_mods/omnimix', True], ['data_mods/vividwave', True], ['data', False]]
-#DATA_DIRS = []
+# DATA_DIRS = [['data_mods/omnimix', True], ['data_mods/vividwave', True], ['data', False]]
+DATA_DIRS = []
 
 # These are the output directories. Set these to wherever you want.
 # Example:
-OUT_SONGS = 'D:/SDVX-Extract/song/wav'
-OUT_PREVIEW = 'D:/SDVX-Extract/preview/wav'
-OUT_JACKET = 'D:/SDVX-Extract/jacket'
-#OUT_SONGS = ''
-#OUT_PREVIEW = ''
-#OUT_JACKET = ''
+# OUT_SONGS = 'D:/SDVX-Extract/song/wav'
+# OUT_PREVIEW = 'D:/SDVX-Extract/preview/wav'
+# OUT_JACKET = 'D:/SDVX-Extract/jacket'
+OUT_SONGS = ''
+OUT_PREVIEW = ''
+OUT_JACKET = ''
 
 ############################################################
 # Script begins here. Do not edit anything past this line. #

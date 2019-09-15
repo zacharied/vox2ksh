@@ -90,9 +90,10 @@ for data_dir in DATA_DIRS:
                 # charts always have 8 files in the 2dx archive, so we check if there's EXACTLY 2 in the archive to
                 # see if it's an INF audio.
                 if os.path.exists('1.wav') and not os.path.exists('2.wav'):
-                    output_filename = f'{song_id}_inf.wav'
-                else:
-                    output_filename = process_diff_2dx(song_file, song_id)
+                    print(f'> Copying INF song to "{song_id}_inf.wav".')
+                    copyfile('1.wav', f'{OUT_SONGS}/{song_id}_inf.wav')
+
+                output_filename = wavname_from_2dx(song_file, song_id)
 
                 print(f'> Copying song to "{output_filename}".')
                 copyfile('0.wav', f'{OUT_SONGS}/{output_filename}')
@@ -102,10 +103,13 @@ for data_dir in DATA_DIRS:
             preview_files = list(glob.glob(f'{data_dir[0]}/sound/preview/???_{str(song_id).zfill(4)}_*.2dx'))
             for preview_file in preview_files:
                 subprocess.call(['C:/Tools/2dxDump.exe', preview_file])
+
                 if os.path.exists('1.wav') and not os.path.exists('2.wav'):
-                    output_filename = f'{song_id}_inf.wav'
-                else:
-                    output_filename = process_diff_2dx(preview_file, song_id)
+                    print(f'> Copying INF preview to "{song_id}_inf.wav".')
+                    copyfile('1.wav', f'{OUT_SONGS}/{song_id}_inf.wav')
+
+                output_filename = wavname_from_2dx(preview_file, song_id)
+
                 print(f'> Copying preview to "{output_filename}".')
                 copyfile('0.wav', f'{OUT_PREVIEW}/{output_filename}')
                 clear_dir('.')

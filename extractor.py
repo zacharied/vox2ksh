@@ -43,7 +43,7 @@ def clear_dir(path):
         except PermissionError:
             rmtree(f'{path}/{f}')
 
-def process_diff_2dx(song_file, song_id):
+def wavname_from_2dx(song_file, song_id):
     if song_file.endswith('_1n.2dx'):
         return f'{song_id}_nov.wav'
     elif song_file.endswith('_2a.2dx'):

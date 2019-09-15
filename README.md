@@ -6,14 +6,14 @@ This converts `.vox` charts to `.ksh` charts. If you don't know what those are t
 
 The paths of the chart files and associated data must match the following requirements. For audio files, the 
 `extractor.py` script in this repo will extract the data in the correct naming convention. Note that `extractor.py` 
-will extract the songs to the `.wav` format; you must convert them to `.ogg`. An example:
+will extract the songs to the `.wav` format; you must convert them to `.ogg`. An example in a Bash shell on Linux:
 
 ```bash
 # In the directory with the output WAVs for previews or tracks.
-for f in *.wav; do ffmpeg -i "$f" -q:a 7 "${f%wav}ogg"; done
+parallel -j$(nproc) ffmpeg -i "{}" -q:a 7 "{.}.ogg" ::: *.wav
 ```
 
-Obviously this requires `ffmpeg` to be installed.
+Obviously this requires `ffmpeg` and GNU `parallel` to be installed.
 
 #### Charts
 

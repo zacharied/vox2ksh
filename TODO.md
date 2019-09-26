@@ -2,15 +2,14 @@
 - [x] Time signature changes
 - [x] FX hold effects (version >= 4)
 - [x] Metadata
-- [x] Preview *(requires patched USC)*
-- [x] Camera *(the specific multipliers might still need tweaking)*
+- [x] Preview
+- [x] Camera
 - [x] Tilt effect
 - [x] Out of bounds lasers
-- [ ] Figure out the rest of the FX and parameters
-- [ ] Figure out the rest of the laser filters and parameters
-- [ ] Slam sounds / volume parameters?
-- [x] Calculate roll duration correctly *(needs testing)*
+- [x] Calculate roll duration correctly *(except for the whack Flower HVN roll)*
 - [x] Implement other kinds of rolls
-- [ ] Test unnatural time signatures more
-- [x] Fix lasers appearing chopped up in places *(needs testing*)
+- [x] Fix lasers appearing chopped up in places
 - [x] FX chip hitsounds
+- [ ] Figure out the rest of the FX and parameters *(stalled due to lack of support in KSH)*
+- [ ] Figure out the rest of the laser filters and parameters 
+- [ ] Slam sounds / volume parameters?

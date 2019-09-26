@@ -1,9 +1,7 @@
 __pycache__/
-data/
 .idea/
-*.ksh
 out/
 exceptions.txt
 issues.txt
 
-README_inc_*.txt
+README_inc*.txt

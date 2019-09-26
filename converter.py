@@ -1226,21 +1226,16 @@ class Vox:
                 self.events[now][(EventKind.TRACK, self.state_track)] = ButtonPress(button, int(splitted[1]), fx_data)
 
 
-    def write_to_ksh(self, jacket_idx=None, using_difficulty_audio=None, using_difficulty_preview=False, file=sys.stdout):
+    def write_to_ksh(self, jacket_idx=None, using_difficulty_audio=None, file=sys.stdout):
         global args
         global debug
 
         track_basename = f'track_{self.difficulty.to_abbreviation()}{AUDIO_EXTENSION}' if using_difficulty_audio else \
             f'track{AUDIO_EXTENSION}'
-        preview_basename = \
-            f'preview_{self.difficulty.to_abbreviation()}{AUDIO_EXTENSION}' if using_difficulty_preview else \
-            f'preview{AUDIO_EXTENSION}'
         jacket_basename = '' if jacket_idx is None else f'jacket_{jacket_idx}.png'
 
         header = f'''// Source: {self.source_file_name}
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
-// previewfile and the sort fields require a modified client to have any effect (the upstream releases of USC and KSM do 
-//   not have support for these fields). https://github.com/zacharied/unnamed-sdvx-clone
 title={self.get_metadata('title_name')}
 artist={self.get_metadata('artist_name')}
 effect={self.get_metadata('effected_by', True)}
@@ -1252,13 +1247,12 @@ difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
 m={track_basename}
-mvol={self.get_metadata('volume')}
-previewfile={preview_basename}
+mvol=90
 o=0
 bg=desert
 layer=arrow
-po=0
-plength=15000
+po=150000
+plength=11000
 pfiltergain={KSH_DEFAULT_FILTER_GAIN}
 filtertype=peak
 chokkakuautovol=0
@@ -1630,7 +1624,6 @@ def do_process_voxfiles(files):
             # Copy media files over.
             if args.do_media:
                 using_difficulty_audio = do_copy_audio(vox, song_dir)
-                using_difficulty_preview = do_copy_preview(vox, song_dir)
                 jacket_idx = do_copy_jacket(vox, song_dir)
 
                 # Copy FX chip sounds.
@@ -1649,7 +1642,6 @@ def do_process_voxfiles(files):
                     try:
                         vox.write_to_ksh(jacket_idx=jacket_idx,
                                          using_difficulty_audio=using_difficulty_audio,
-                                         using_difficulty_preview=using_difficulty_preview,
                                          file=ksh_file)
                     except Exception as e:
                         print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
@@ -1799,7 +1791,7 @@ def main():
     argparser.add_argument('-x', '--no-merge-db', action='store_false', dest='multi_db')
     argparser.add_argument('-V', '--vox-dir', default='D:/SDVX-Extract/vox')
     argparser.add_argument('-D', '--db-dir', default='D:/SDVX-Extract/music_db')
-    argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song')
+    argparser.add_argument('-A', '--audio-dir', default='D:/SDVX-Extract/song_prepared')
     argparser.add_argument('-C', '--fx-chip-sound-dir', default='D:/SDVX-Extract/fx_chip_sound')
     argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
     argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')

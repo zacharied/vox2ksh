@@ -5,15 +5,7 @@ This converts `.vox` charts to `.ksh` charts. If you don't know what those are t
 ## Prerequisites
 
 The paths of the chart files and associated data must match the following requirements. For audio files, the 
-`extractor.py` script in this repo will extract the data in the correct naming convention. Note that `extractor.py` 
-will extract the songs to the `.wav` format; you must convert them to `.ogg`. An example in a Bash shell on Linux:
-
-```bash
-# In the directory with the output WAVs for previews or tracks.
-parallel -j$(nproc) ffmpeg -i "{}" -q:a 7 "{.}.ogg" ::: *.wav
-```
-
-Obviously this requires `ffmpeg` and GNU `parallel` to be installed.
+`extractor.py` script in this repo will extract the data in the correct naming convention.
 
 #### Charts
 
@@ -22,15 +14,17 @@ Upon extraction, the files will be in a number of `vox_<xx>_ifs` directories. Mo
 directories into the one specified by the `--vox-dir` flag. There should be no subdirectories within that directory; a 
 path to a chart would be `<vox-dir>/<a chart>.vox`.
 
-#### Songs
+#### Songs & previews
 
-Songs go in the directory specified by the `--audio-dir` flag. They must all be in one folder, with names in the format 
-`<song id>.ogg`. Songs with extra **INF** audio should have said audio file named `<song id>_4i.ogg`. This ID should not
-have any leading zeroes. So, the audio file for song with ID 25 would be `25.ogg`.
+Previews and song audio are stored in separate files. The KSH format does not support separate preview audio files, so
+we employ a workaround: attach the preview audio to the end of the song audio following a short period of silence. With
+a correct `po` (preview offset) in the KSH file, the preview will play correctly, but the chart will end early enough
+that playback stops before the preview. 
 
-#### Previews
-
-Previews follow the same convention as the songs but in the directory specified by `--preview-dir`.
+First, arrange your song audio and preview audio in two separate directories with the naming scheme given by the
+`extractor.py` script. Then use the `prepare_audio.py` script. It searches the first argument for song audio files and
+the second argument for preview files, concatenates them with the correct amount of silence, and then outputs an OGG
+file with the same name as the input files to the third argument.
 
 #### FX Chip Sounds
 

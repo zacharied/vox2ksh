@@ -44,75 +44,37 @@ class Debug:
         WARNING = 'warning'
         ERROR = 'error'
 
-    def __init__(self, exceptions_file="exceptions.txt"):
-        self._state = {}
-        self._input_filename = {}
-        self._output_filename = {}
-        self._current_line_num = {}
-        self._exceptions_count = {}
-        self._exceptions_file = open(exceptions_file, 'w+')
-        self._lock = threading.Lock()
-
-    @staticmethod
-    def _get_threaded(member):
-        if threading.get_ident() not in member:
-            return None
-        return member[threading.get_ident()]
-
-    @staticmethod
-    def _set_threaded(member, value):
-        member[threading.get_ident()] = value
+    def __init__(self, exceptions_file):
+        self.state = None
+        self.input_filename = None
+        self.output_filename = None
+        self.current_line_num = 0
+        self.exceptions_count = {level: 0 for level in Debug.Level}
+        self.exceptions_file = open(exceptions_file, 'w+')
 
     def reset(self):
         for level in self.Level:
-            if threading.get_ident() in self._exceptions_count:
-                self._exceptions_count[threading.get_ident()][level] = 0
+            self.exceptions_count[level] = 0
 
     def close(self):
-        self._exceptions_file.close()
+        self.exceptions_file.close()
 
     def current_filename(self):
         return self.input_filename if self.state == self.State.INPUT else self.output_filename
 
     def record(self, level, tag, message):
-        self._lock.acquire()
-        if threading.get_ident() not in self._exceptions_count:
-            self._exceptions_count[threading.get_ident()] = {level: 0 for level in Debug.Level}
-        self._exceptions_count[threading.get_ident()][level] += 1
+        self.exceptions_count[level] += 1
         print(f'{self.current_filename()}:{self.current_line_num}\n{level.value} / {tag}: {message}\n',
-              file=self._exceptions_file)
-        self._lock.release()
+              file=self.exceptions_file)
+
+    def has_issues(self):
+        for level in self.Level:
+            if self.exceptions_count[level] > 0:
+                return True
+        return False
 
     def record_last_exception(self, level=Level.WARNING, tag='python_exception', trace=False):
         self.record(level, tag, traceback.format_exc() if trace else sys.exc_info()[1])
-
-    @property
-    def state(self):
-        return Debug._get_threaded(self._state)
-    @state.setter
-    def state(self, value):
-        Debug._set_threaded(self._state, value)
-    @property
-    def input_filename(self):
-        return Debug._get_threaded(self._input_filename)
-    @input_filename.setter
-    def input_filename(self, value):
-        Debug._set_threaded(self._input_filename, value)
-    @property
-    def output_filename(self):
-        return Debug._get_threaded(self._output_filename)
-    @output_filename.setter
-    def output_filename(self, value):
-        Debug._set_threaded(self._output_filename, value)
-    @property
-    def current_line_num(self):
-        return Debug._get_threaded(self._current_line_num)
-    @current_line_num.setter
-    def current_line_num(self, value):
-        Debug._set_threaded(self._current_line_num, value)
-    @property
-    def exceptions_count(self):
-        return Debug._get_threaded(self._exceptions_count)
 
 def truncate(x, digits) -> float:
     stepper = 10.0 ** digits
@@ -342,8 +304,6 @@ class KshEffectDefine:
     @classmethod
     def from_pre_v4_vox_sound_id(cls, sound_id):
         """Generate an effect definition line from the old-style effect declaration."""
-        global debug
-
         define = cls()
 
         if sound_id == 2:
@@ -368,7 +328,7 @@ class KshEffectDefine:
             define.effect = KshEffect.PITCHSHIFT
             define.main_param = '8' # TODO Tweak
         elif sound_id > 8:
-            debug.record(Debug.Level.WARNING, 'fx_parse', f'old vox sound id {sound_id} unknown')
+            debug().record(Debug.Level.WARNING, 'fx_parse', f'old vox sound id {sound_id} unknown')
 
         if define.effect is None:
             define = cls.default_effect()
@@ -973,15 +933,13 @@ class Vox:
         return parser
 
     def parse(self):
-        global debug
-
         line_no = 0
         section_line_no = 0
 
         for line in self.voxfile:
             section_line_no += 1
             line_no += 1
-            debug.current_line_num = line_no
+            debug().current_line_num = line_no
 
             line = line.strip()
 
@@ -1002,7 +960,7 @@ class Vox:
             elif line.startswith('define\t'):
                 splitted = line.split('\t')
                 if len(splitted) != 3:
-                    debug.record(Debug.Level.WARNING, 'fx_define', f'define line "{line}" does not have 3 operands')
+                    debug().record(Debug.Level.WARNING, 'fx_define', f'define line "{line}" does not have 3 operands')
                     continue
 
                 self.vox_defines[splitted[1]] = int(splitted[2])
@@ -1015,8 +973,6 @@ class Vox:
         self.finalized = True
 
     def process_state(self, line, section_line_num):
-        global debug
-
         splitted = line.split('\t')
 
         if line == '':
@@ -1040,7 +996,7 @@ class Vox:
                 self.events[now][EventKind.BPM] = float(line)
             except ValueError:
                 # Jomanda adv seems to have the string "BAROFF" at one point.
-                debug.record_last_exception(Debug.Level.ABNORMALITY, tag='bpm_parse')
+                debug().record_last_exception(Debug.Level.ABNORMALITY, tag='bpm_parse')
 
         elif self.state == self.State.BPM_INFO:
             if splitted[2].endswith('-'):
@@ -1068,28 +1024,28 @@ class Vox:
                         self.stop_point.moment, self.stop_point.timesig)
                     self.stop_point = None
                 if splitted[2] != '4' and splitted[2] != '4-':
-                    debug.record(Debug.Level.ABNORMALITY, 'bpm_info', f'non-4 beat division in bpm info: {splitted[2]}')
+                    debug().record(Debug.Level.ABNORMALITY, 'bpm_info', f'non-4 beat division in bpm info: {splitted[2]}')
                 self.events[now][EventKind.BPM] = float(splitted[1])
 
         elif self.state == self.State.TILT_INFO:
             try:
                 self.events[now][EventKind.TILTMODE] = TiltMode.from_vox_id(int(splitted[1]))
             except ValueError:
-                debug.record_last_exception(level=Debug.Level.WARNING)
+                debug().record_last_exception(level=Debug.Level.WARNING)
 
         elif self.state == self.State.END_POSITION:
             self.end = now
 
         elif self.state == self.State.SOUND_ID:
             # The `define` handler takes care of this outside of this loop.
-            debug.record(Debug.Level.WARNING,
+            debug().record(Debug.Level.WARNING,
                          'vox_parse',
                          f'({self.state}) line other than a #define was encountered in SOUND ID')
 
         elif self.state == self.State.TAB_EFFECT:
             # TODO Tab effects
             if TabEffectInfo.line_is_abnormal(section_line_num, line):
-                debug.record(Debug.Level.ABNORMALITY, 'tab_effect', f'tab effect info abnormal: {line}')
+                debug().record(Debug.Level.ABNORMALITY, 'tab_effect', f'tab effect info abnormal: {line}')
 
         elif self.state == self.State.FXBUTTON_EFFECT:
             if self.vox_version < 6:
@@ -1098,29 +1054,29 @@ class Vox:
                     self.effect_defines[section_line_num - 1] = KshEffectDefine.from_effect_info_line(line)
                 except ValueError:
                     self.effect_defines[section_line_num - 1] = KshEffectDefine.default_effect()
-                    debug.record_last_exception(tag='fx_load')
+                    debug().record_last_exception(tag='fx_load')
             else:
                 if (section_line_num - 1) % 3 < 2:
                     # The < 2 condition will allow the second line to override the first.
                     if line.isspace():
-                        debug.record(Debug.Level.WARNING, 'fx_load', 'fx effect info line is blank')
+                        debug().record(Debug.Level.WARNING, 'fx_load', 'fx effect info line is blank')
                     elif splitted[0] != '0,':
                         index = int(section_line_num / 3)
                         try:
                             self.effect_defines[index] = KshEffectDefine.from_effect_info_line(line)
                         except ValueError:
                             self.effect_defines[index] = KshEffectDefine.default_effect()
-                            debug.record_last_exception(level=Debug.Level.WARNING, tag='fx_load')
+                            debug().record_last_exception(level=Debug.Level.WARNING, tag='fx_load')
 
         elif self.state == self.State.TAB_PARAM_ASSIGN:
             if TabParamAssignInfo.line_is_abnormal(line):
-                debug.record(Debug.Level.ABNORMALITY, 'tab_param_assign', f'tab param assign info abnormal: {line}')
+                debug().record(Debug.Level.ABNORMALITY, 'tab_param_assign', f'tab param assign info abnormal: {line}')
 
         elif self.state == self.State.SPCONTROLLER:
             try:
                 param = SpcParam.from_vox_name(splitted[1])
             except ValueError:
-                debug.record_last_exception(tag='spcontroller_load')
+                debug().record_last_exception(tag='spcontroller_load')
                 return
 
             if param is not None:
@@ -1132,7 +1088,7 @@ class Vox:
                     pass
 
             if SpcParam.line_is_abnormal(param, splitted):
-                debug.record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
+                debug().record(Debug.Level.ABNORMALITY, 'spcontroller_load', 'spcontroller line is abnormal')
 
         elif self.state == self.state.TRACK:
             if self.state_track == 1 or self.state_track == 8:
@@ -1144,13 +1100,13 @@ class Vox:
                     laser_node.roll_kind = next(iter([r for r in RollKind if r.value == int(splitted[3])]))
                 except StopIteration:
                     if splitted[3] != '0':
-                        debug.record(Debug.Level.ABNORMALITY, 'roll_parse', f'roll type: {splitted[3]}')
+                        debug().record(Debug.Level.ABNORMALITY, 'roll_parse', f'roll type: {splitted[3]}')
 
                 if len(splitted) > 4:
                     try:
                         laser_node.filter = KshFilter.from_vox_filter_id(int(splitted[4]))
                     except ValueError:
-                        debug.record_last_exception(tag='laser_load')
+                        debug().record_last_exception(tag='laser_load')
 
                 if len(splitted) > 5:
                     laser_node.range = int(splitted[5])
@@ -1173,7 +1129,7 @@ class Vox:
                     try:
                         slam = LaserSlam(slam_start, laser_node)
                     except ValueError:
-                        debug.record_last_exception(Debug.Level.WARNING, tag='slam_parse')
+                        debug().record_last_exception(Debug.Level.WARNING, tag='slam_parse')
                         return
                     self.events[now][(EventKind.TRACK, self.state_track)] = slam
 
@@ -1181,7 +1137,7 @@ class Vox:
                 try:
                     button = Button.from_track_num(self.state_track)
                 except ValueError:
-                    debug.record_last_exception(tag='button_load')
+                    debug().record_last_exception(tag='button_load')
                     return
 
                 if button is None:
@@ -1201,12 +1157,12 @@ class Vox:
                                 # It's a regular effect.
                                 fx_data = int(splitted[2]) - 2
                             elif int(splitted[2]) == 254:
-                                debug.record(Debug.Level.WARNING,
+                                debug().record(Debug.Level.WARNING,
                                              'button_fx',
                                              'reverb effect is unimplemented, using fallback')
                                 fx_data = -1
                             else:
-                                debug.record(Debug.Level.WARNING,
+                                debug().record(Debug.Level.WARNING,
                                              'button_fx',
                                              'out of bounds fx index for FX hold, using fallback')
                                 fx_data = -1
@@ -1215,7 +1171,7 @@ class Vox:
                         if self.vox_version >= 9:
                             sound_id = int(splitted[2])
                             if sound_id != -1 and sound_id != 255 and (sound_id >= FX_CHIP_SOUND_COUNT or sound_id < 0):
-                                debug.record(Debug.Level.WARNING,
+                                debug().record(Debug.Level.WARNING,
                                              'chip_sound_parse',
                                              f'unhandled chip sound id {sound_id}')
                             elif 1 <= sound_id < FX_CHIP_SOUND_COUNT:
@@ -1227,7 +1183,6 @@ class Vox:
 
     def write_to_ksh(self, jacket_idx=None, using_difficulty_audio=None, file=sys.stdout):
         global args
-        global debug
 
         track_basename = f'track_{self.difficulty.to_abbreviation()}{AUDIO_EXTENSION}' if using_difficulty_audio else \
             f'track{AUDIO_EXTENSION}'
@@ -1281,7 +1236,7 @@ ver=167'''
         last_laser_timing = {s: None for s in LaserSide}
         last_filter = KshFilter.PEAK
         current_timesig = self.events[Timing(1, 1, 0)][EventKind.TIMESIG]
-        debug.current_line_num = len(header.split('\n')) + 1
+        debug().current_line_num = len(header.split('\n')) + 1
 
         measure_iter = range(self.end.measure)
 
@@ -1328,7 +1283,7 @@ ver=167'''
                                 cam_param: SpcParam = kind[1]
                                 if cam_param.to_ksh_value() is not None:
                                     if ongoing_spcontroller_events[cam_param] is not None and ongoing_spcontroller_events[cam_param].time_left != 0:
-                                        debug.record(Debug.Level.WARNING, 'spnode_output', f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
+                                        debug().record(Debug.Level.WARNING, 'spnode_output', f'spcontroller node at {now} interrupts another of same kind ({cam_param})')
                                     ongoing_spcontroller_events[cam_param] = SpControllerCountdown(event=event, time_left=event.duration)
                                     buffer.meta.append(f'{cam_param.to_ksh_name()}={cam_param.to_ksh_value(event.start_param)}')
                                 elif cam_param.is_state():
@@ -1353,7 +1308,7 @@ ver=167'''
 
                                         if laser.roll_kind is not None:
                                             if buffer.spin != '':
-                                                debug.record(Debug.Level.WARNING, 'ksh_laser', 'spin on both lasers')
+                                                debug().record(Debug.Level.WARNING, 'ksh_laser', 'spin on both lasers')
 
                                             if laser.roll_kind.value <= 3:
                                                 buffer.spin = '@'
@@ -1457,7 +1412,7 @@ ver=167'''
                                                     effect_string = event.effect[0].to_ksh_name(event.effect[1])
                                                 buffer.meta.append(f'fx-{letter}={effect_string}')
                                             except KeyError:
-                                                debug.record_last_exception(tag='button_fx')
+                                                debug().record_last_exception(tag='button_fx')
                                         buffer.buttons[event.button] = KshLineBuf.ButtonState.HOLD
                                         holds[event.button] = event.duration
                                     elif args.do_media:
@@ -1506,11 +1461,11 @@ ver=167'''
 
                     print(out, file=file)
 
-                    debug.current_line_num += len(out.split('\n'))
+                    debug().current_line_num += len(out.split('\n'))
 
             print('--', file=file)
 
-            debug.current_line_num += 1
+            debug().current_line_num += 1
 
         for k, v in self.effect_defines.items():
             print(v.to_define_line(k), file=file)
@@ -1584,21 +1539,20 @@ def thread_print(line):
 
 def do_process_voxfiles(files):
     global args
-    global debug
 
     # Load source directory.
     for vox_path in files:
         try:
-            debug.state = Debug.State.INPUT
-            debug.input_filename = vox_path
-            debug.output_filename = None
-            debug.reset()
+            debug().state = Debug.State.INPUT
+            debug().input_filename = vox_path
+            debug().output_filename = None
+            debug().reset()
 
             # noinspection PyBroadException
             try:
                 vox = Vox.from_file(vox_path)
             except Exception:
-                debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
+                debug().record_last_exception(level=Debug.Level.ERROR, tag='vox_load')
                 continue
 
             thread_print(f'Processing "{vox_path}": {str(vox)}')
@@ -1608,7 +1562,7 @@ def do_process_voxfiles(files):
                 vox.parse()
             except Exception as e:
                 thread_print(f'Parsing vox file failed with "{str(e)}":\n{traceback.format_exc()}')
-                debug.record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
+                debug().record_last_exception(level=Debug.Level.ERROR, tag='vox_parse', trace=True)
                 continue
 
             # Make the output directory.
@@ -1632,8 +1586,8 @@ def do_process_voxfiles(files):
             # Output the KSH chart.
             chart_path = f'{song_dir}/chart_{vox.diff_abbreviation()}.ksh'
 
-            debug.output_filename = chart_path
-            debug.state = Debug.State.OUTPUT
+            debug().output_filename = chart_path
+            debug().state = Debug.State.OUTPUT
 
             if args.do_convert:
                 thread_print(f'Writing KSH data to "{chart_path}".')
@@ -1644,10 +1598,10 @@ def do_process_voxfiles(files):
                                          file=ksh_file)
                     except Exception as e:
                         print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
-                        debug.record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
+                        debug().record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
                         continue
-                    if debug.exceptions_count is not None:
-                        exceptions = debug.exceptions_count
+                    if debug().has_issues():
+                        exceptions = debug().exceptions_count
                         thread_print(f'Finished conversion with {exceptions[Debug.Level.ABNORMALITY]} abnormalities, {exceptions[Debug.Level.WARNING]} warnings, and {exceptions[Debug.Level.ERROR]} errors.')
                     else:
                         thread_print(f'Finished conversion with no issues.')
@@ -1655,7 +1609,7 @@ def do_process_voxfiles(files):
                 thread_print(f'Skipping conversion step.')
             vox.close()
         except Exception as e:
-            debug.record_last_exception(Debug.Level.ERROR, 'other', f'an error occurred: {str(e)}')
+            debug().record_last_exception(Debug.Level.ERROR, 'other', f'an error occurred: {str(e)}')
 
 def do_copy_audio(vox, out_dir):
     """
@@ -1663,7 +1617,6 @@ def do_copy_audio(vox, out_dir):
     :return: True if the audio file is difficulty-specific, otherwise False.
     """
     global args
-    global debug
 
     using_difficulty_audio = False
 
@@ -1695,7 +1648,6 @@ def do_copy_jacket(vox, out_dir):
     :return: The index of the jacket used by this vox.
     """
     global args
-    global debug
 
     src_jacket_path = f'{args.jacket_dir}/{vox.song_id}_{vox.difficulty.to_jacket_ifs_numer()}.png'
 
@@ -1710,7 +1662,7 @@ def do_copy_jacket(vox, out_dir):
         while True:
             if fallback_jacket_diff_idx < 0:
                 thread_print('No jackets found for easier difficulties either. Leaving jacket blank.')
-                debug.record(Debug.Level.WARNING, 'copy_jacket', 'could not find any jackets to copy')
+                debug().record(Debug.Level.WARNING, 'copy_jacket', 'could not find any jackets to copy')
                 return None
 
             easier_jacket_path = f'{args.jacket_dir}/{vox.song_id}_{fallback_jacket_diff_idx}.png'
@@ -1730,7 +1682,6 @@ def do_copy_preview(vox, out_dir):
     :return: True if this chart has a difficulty-specific preview file, False otherwise.
     """
     global args
-    global debug
 
     output_path = f'{out_dir}/preview{AUDIO_EXTENSION}'
     preview_path = f'{args.preview_dir}/{vox.song_id}{AUDIO_EXTENSION}'
@@ -1751,7 +1702,7 @@ def do_copy_preview(vox, out_dir):
         copyfile(preview_path, output_path)
     else:
         print('> No preview file found.')
-        debug.record(Debug.Level.WARNING, 'preview_copy', 'could not find preview file')
+        debug().record(Debug.Level.WARNING, 'preview_copy', 'could not find preview file')
         return None
 
     return using_difficulty_preview
@@ -1759,7 +1710,6 @@ def do_copy_preview(vox, out_dir):
 def do_copy_fx_chip_sounds(vox, out_dir):
     """ For each FX chip sound used in the chart, copy the sound file to the output directory. """
     global args
-    global debug
 
     thread_print(f'Copying FX chip sounds {vox.required_chip_sounds}.')
     for sound in vox.required_chip_sounds:
@@ -1768,15 +1718,22 @@ def do_copy_fx_chip_sounds(vox, out_dir):
         if os.path.exists(src_path):
             copyfile(src_path, target_path)
         else:
-            debug.record(Debug.Level.ERROR, 'copy_fx_chip_sound', f'cannot find file for chip sound with id {sound}')
+            debug().record(Debug.Level.ERROR, 'copy_fx_chip_sound', f'cannot find file for chip sound with id {sound}')
             copyfile(f'{args.fx_chip_sound_dir}/0{FX_CHIP_SOUND_EXTENSION}', target_path)
+
+def debug():
+    global debugs
+
+    if threading.get_ident() not in debugs:
+        debugs[threading.get_ident()] = Debug(f'debug/exceptions_{threading.get_ident()}.txt')
+    return debugs[threading.get_ident()]
 
 ##############
 # PROGRAM RUNTIME BEGINS BELOW
 #############
 
 args = None
-debug = None
+debugs = {}
 
 def main():
     global args
@@ -1810,6 +1767,8 @@ def main():
         os.mkdir('out')
 
     candidates = []
+
+    print(f'Finding vox files.')
 
     for filename in glob(f'{args.vox_dir}/*.vox'):
         import re
@@ -1847,21 +1806,20 @@ def main():
 
     threads = []
 
-    global debug
-    debug = Debug(exceptions_file=f'exceptions.txt')
+    global debugs
 
     for i in range(args.num_cores):
-        threads.append(threading.Thread(target=do_process_voxfiles, args=(groups[i],), name=f'Thread-{i}'))
+        thread = threading.Thread(target=do_process_voxfiles, args=(groups[i],), name=f'Thread-{i}')
+        threads.append(thread)
 
     print(f'Performing conversion across {args.num_cores} threads.')
 
     for t in threads:
         t.start()
-
     for t in threads:
         t.join()
-
-    debug.close()
+    for d in debugs:
+        d.close()
 
 if __name__ == '__main__':
     main()

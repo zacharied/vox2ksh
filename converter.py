@@ -1246,7 +1246,7 @@ difficulty={self.difficulty.to_ksh_name()}
 level={self.get_metadata('difnum', True)}
 t={self.bpm_string()}
 m={track_basename}
-mvol=90
+mvol=70
 o=0
 bg=desert
 layer=arrow
@@ -1839,7 +1839,11 @@ def main():
 
     groups = [[] for _ in range(args.num_cores)]
     for i, candidate in enumerate(candidates):
-        groups[i % args.num_cores].append(candidate)
+        try:
+            song_id = os.path.basename(candidate).split('_')[1]
+            groups[int(song_id) % args.num_cores].append(candidate)
+        except (ValueError, IndexError):
+            groups[i % args.num_cores].append(candidate)
 
     threads = []
 

@@ -595,7 +595,6 @@ class LaserNode:
 
     def position_ksh(self):
         """ Convert the position from the 7-bit scale to whatever the hell KSM is using. """
-        # TODO This is wrong occassionally (try lowermost revolt 16)
         chars = []
         for char in range(10):
             chars.append(chr(ord('0') + char))
@@ -603,7 +602,7 @@ class LaserNode:
             chars.append(chr(ord('A') + char))
         for char in range(15):
             chars.append(chr(ord('a') + char))
-        idx = math.floor((self.position / 127) * (len(chars) - 1))
+        idx = math.ceil((self.position / 127) * (len(chars) - 1))
         return chars[idx]
 
 class LaserSlam:
@@ -1573,7 +1572,8 @@ CASES = {
     'spc-tilt': (71, 'i'),
     'wtf': (1361, 'm'),
     'removed-data': (233, 'e'),
-    'timesig-stop': (1148, 'm')
+    'timesig-stop': (1148, 'm'),
+    'laser-centering': (1244, 'm')
 }
 
 thread_id_index = {}
@@ -1619,7 +1619,6 @@ def do_process_voxfiles(files):
 
             jacket_idx = None
             using_difficulty_audio = None
-            using_difficulty_preview = None
 
             # Copy media files over.
             if args.do_media:

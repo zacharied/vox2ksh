@@ -1818,7 +1818,7 @@ def main():
         t.start()
     for t in threads:
         t.join()
-    for d in debugs:
+    for d in debugs.values():
         d.close()
 
 if __name__ == '__main__':

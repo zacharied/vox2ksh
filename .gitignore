@@ -1,7 +1,8 @@
 __pycache__/
 .idea/
+
+debug/
 out/
-exceptions.txt
-issues.txt
 
 README_inc*.txt
+TODO

@@ -5,10 +5,10 @@ import threading
 
 from recordclass import dataobject
 from xml.etree import ElementTree
-from shutil import copyfile
 import traceback
 import random
 import math
+import shutil
 
 import sys, os
 import argparse
@@ -1636,7 +1636,7 @@ def do_copy_audio(vox, out_dir):
 
     if not os.path.exists(target_audio_path):
         thread_print(f'Copying audio file "{src_audio_path}" to song directory.')
-        copyfile(src_audio_path, target_audio_path)
+        shutil.copyfile(src_audio_path, target_audio_path)
     else:
         thread_print(f'Audio file "{target_audio_path}" already exists.')
 
@@ -1654,7 +1654,7 @@ def do_copy_jacket(vox, out_dir):
     if os.path.exists(src_jacket_path):
         target_jacket_path = f'{out_dir}/jacket_{str(vox.difficulty.to_jacket_ifs_numer())}.png'
         thread_print(f'Jacket image file found at "{src_jacket_path}". Copying to "{target_jacket_path}".')
-        copyfile(src_jacket_path, target_jacket_path)
+        shutil.copyfile(src_jacket_path, target_jacket_path)
     else:
         thread_print(f'Could not find jacket image file. Checking easier diffs.')
         fallback_jacket_diff_idx = vox.difficulty.to_jacket_ifs_numer() - 1
@@ -1670,7 +1670,7 @@ def do_copy_jacket(vox, out_dir):
             if os.path.exists(easier_jacket_path):
                 # We found the diff number with the jacket.
                 thread_print(f'Using jacket "{easier_jacket_path}".')
-                copyfile(easier_jacket_path, target_jacket_path)
+                shutil.copyfile(easier_jacket_path, target_jacket_path)
                 return fallback_jacket_diff_idx
             fallback_jacket_diff_idx -= 1
 
@@ -1699,7 +1699,7 @@ def do_copy_preview(vox, out_dir):
 
     if os.path.exists(preview_path):
         thread_print(f'Copying preview to "{output_path}".')
-        copyfile(preview_path, output_path)
+        shutil.copyfile(preview_path, output_path)
     else:
         print('> No preview file found.')
         debug().record(Debug.Level.WARNING, 'preview_copy', 'could not find preview file')
@@ -1716,10 +1716,10 @@ def do_copy_fx_chip_sounds(vox, out_dir):
         src_path = f'{args.fx_chip_sound_dir}/{sound}{FX_CHIP_SOUND_EXTENSION}'
         target_path = f'{out_dir}/fxchip_{sound}{FX_CHIP_SOUND_EXTENSION}'
         if os.path.exists(src_path):
-            copyfile(src_path, target_path)
+            shutil.copyfile(src_path, target_path)
         else:
             debug().record(Debug.Level.ERROR, 'copy_fx_chip_sound', f'cannot find file for chip sound with id {sound}')
-            copyfile(f'{args.fx_chip_sound_dir}/0{FX_CHIP_SOUND_EXTENSION}', target_path)
+            shutil.copyfile(f'{args.fx_chip_sound_dir}/0{FX_CHIP_SOUND_EXTENSION}', target_path)
 
 def debug():
     global debugs
@@ -1738,7 +1738,7 @@ debugs = {}
 def main():
     global args
     argparser = argparse.ArgumentParser(description='Convert vox to ksh')
-    argparser.add_argument('-c', '--num-cores', default=1, type=int)
+    argparser.add_argument('-j', '--num-cores', default=1, type=int)
     argparser.add_argument('-t', '--testcase')
     argparser.add_argument('-i', '--song-id')
     argparser.add_argument('-d', '--song-difficulty')
@@ -1751,6 +1751,8 @@ def main():
     argparser.add_argument('-C', '--fx-chip-sound-dir', default='D:/SDVX-Extract/fx_chip_sound')
     argparser.add_argument('-J', '--jacket-dir', default='D:/SDVX-Extract/jacket')
     argparser.add_argument('-P', '--preview-dir', default='D:/SDVX-Extract/preview')
+    argparser.add_argument('-c', '--clean-output', action='store_true', dest='do_clean_output')
+    argparser.add_argument('-e', '--clean-debug', action='store_true', dest='do_clean_debug')
     args = argparser.parse_args()
 
     if args.testcase:
@@ -1762,9 +1764,19 @@ def main():
             exit(1)
 
     # Create output directory.
+    if args.do_clean_output:
+        print('Cleaning directory of old charts.')
+        shutil.rmtree('out')
     if not os.path.exists('out'):
         print(f'Creating output directory.')
         os.mkdir('out')
+
+    if args.do_clean_debug:
+        print('Cleaning directory of debug output.')
+        shutil.rmtree('debug')
+    if not os.path.exists('debug'):
+        print(f'Creating debug output directory.')
+        os.mkdir('debug')
 
     candidates = []
 

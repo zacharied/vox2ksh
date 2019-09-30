@@ -1559,6 +1559,8 @@ def do_process_voxfiles(files):
 
             thread_print(f'Processing "{vox_path}": {str(vox)}')
 
+            start_time = time.time()
+
             # First try to parse the file.
             try:
                 vox.parse()
@@ -1602,11 +1604,12 @@ def do_process_voxfiles(files):
                         print(f'Outputting to ksh failed with "{str(e)}"\n{traceback.format_exc()}\n')
                         debug().record_last_exception(level=Debug.Level.ERROR, tag='ksh_output', trace=True)
                         continue
+                    duration = time.time() - start_time
                     if debug().has_issues():
                         exceptions = debug().exceptions_count
-                        thread_print(f'Finished conversion with {exceptions[Debug.Level.ABNORMALITY]} abnormalities, {exceptions[Debug.Level.WARNING]} warnings, and {exceptions[Debug.Level.ERROR]} errors.')
+                        thread_print(f'Finished conversion in {truncate(duration, 4)}s with {exceptions[Debug.Level.ABNORMALITY]} abnormalities, {exceptions[Debug.Level.WARNING]} warnings, and {exceptions[Debug.Level.ERROR]} errors.')
                     else:
-                        thread_print(f'Finished conversion with no issues.')
+                        thread_print(f'Finished conversion in {truncate(duration, 4)}s with no issues.')
             else:
                 thread_print(f'Skipping conversion step.')
             vox.close()

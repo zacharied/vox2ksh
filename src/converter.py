@@ -9,6 +9,8 @@ import traceback
 import random
 import math
 import shutil
+import time
+import configparser
 
 import sys, os
 import argparse
@@ -1205,7 +1207,7 @@ mvol=70
 o=0
 bg=desert
 layer=arrow
-po=150000
+po={int(config['Audio']['hidden_preview_position']) * 1000}
 plength=11000
 pfiltergain={KSH_DEFAULT_FILTER_GAIN}
 filtertype=peak
@@ -1734,8 +1736,14 @@ def debug():
 
 args = None
 debugs = {}
+config = configparser.ConfigParser()
 
 def main():
+    global config
+    if not os.path.exists('config.ini'):
+        print('Please create a config.ini based off the provided sample.', file=sys.stderr)
+        sys.exit(1)
+    config.read('config.ini')
     global args
     argparser = argparse.ArgumentParser(description='Convert vox to ksh')
     argparser.add_argument('-j', '--num-cores', default=1, type=int)

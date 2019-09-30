@@ -14,7 +14,9 @@ from pydub import AudioSegment
 argparser = argparse.ArgumentParser()
 argparser.add_argument('-c', '--num-cores', type=int, default=3)
 argparser.add_argument('-e', '--src-audio-extension', default='ogg')
-argparser.add_argument('-n', '--no-normalize', action='store_false', dest='do_normalize')
+argparser.add_argument('-n', '--normalize', action='store_true', dest='do_normalize',
+                       help='Normalize the audio. Not needed in most cases since volume is handled in the chart '
+                            'metadata.')
 args = argparser.parse_args()
 
 config = configparser.ConfigParser()

@@ -90,8 +90,10 @@ for data_dir in DATA_DIRS:
                 # charts always have 8 files in the 2dx archive, so we check if there's EXACTLY 2 in the archive to
                 # see if it's an INF audio.
                 if os.path.exists('1.wav') and not os.path.exists('2.wav'):
-                    print(f'> Copying INF song to "{song_id}_inf.wav".')
-                    copyfile('1.wav', f'{OUT_SONGS}/{song_id}_inf.wav')
+                    # Actually, some songs follow that pattern but have no INF.
+                    if child.find('info/inf_ver').text != '0':
+                        print(f'> Copying INF song to "{song_id}_inf.wav".')
+                        copyfile('1.wav', f'{OUT_SONGS}/{song_id}_inf.wav')
 
                 output_filename = wavname_from_2dx(song_file, song_id)
 

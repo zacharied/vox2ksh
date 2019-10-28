@@ -4,8 +4,10 @@ This converts `.vox` charts to `.ksh` charts. If you don't know what those are t
 
 ## Prerequisites
 
-The paths of the chart files and associated data must match the following requirements. For audio files, the 
-`extractor.py` script in this repo will extract the data in the correct naming convention.
+Copy `config.sample.ini` to `config.ini` and edit the copy to contain the necessary paths.
+
+The paths of the chart files and associated data must match the following requirements. Note that the `extractor.py`
+script will extract song audio, preview audio, and jacket artwork with the proper naming schemes.
 
 #### Charts
 
@@ -29,8 +31,10 @@ file with the same name as the input files to the third argument.
 #### FX Chip Sounds
 
 Place these files in the directory specified by the `--fx-chip-sound-dir` flag. They should be named in the same order 
-they came out of the IFS archive, which can be found in the same directory as the song audio. Their extension should be 
-the same as the rest of the audio files.
+they came out of the IFS archive, which can be found in the same directory as the song audio. They should be in the WAV
+format.
+
+*TODO: Extract FX chip sounds in extractor.*
 
 #### Jackets
 
@@ -40,7 +44,10 @@ Jackets belong in the directory specified by the `--jacket-dir` flag. Their name
 
 #### Metadata
 
-Place the `music_db.xml` in the `data` directory. It can be found in the same directory as the source IFS files.
+Place the `music_db.xml` in the directory specified by your config. It can be found in the same directory as the source 
+IFS files.
+
+*TODO: Extract music DB files in extractor.*
 
 ## Usage
 

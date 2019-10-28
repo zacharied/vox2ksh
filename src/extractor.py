@@ -16,12 +16,6 @@ db_output_dir = config['Directories']['music_db_source_dir'] # TODO Extract musi
 game_contents_dir = config['Directories']['game_contents_dir']
 path_to_2dxdump = config['Utilities']['app_2dxdump_path']
 
-############################################################
-# Script begins here. Do not edit anything past this line. #
-############################################################
-
-# TODO Documentation here.
-
 def clear_dir(path):
     for f in os.listdir(path):
         try:

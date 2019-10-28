@@ -25,14 +25,14 @@ SLAM_TICKS = 4
 FX_CHIP_SOUND_COUNT = 14
 
 KSH_DEFAULT_FILTER_GAIN = 50
-KSH_DEFAULT_SLAM_VOL = 82
+KSH_DEFAULT_SLAM_VOL = 59
 
 EFFECT_FALLBACK_NAME = 'fallback'
 
 AUDIO_EXTENSION = '.ogg'
 FX_CHIP_SOUND_EXTENSION = '.wav'
 
-FX_CHIP_SOUND_VOL_PERCENT = 50
+FX_CHIP_SOUND_VOL_PERCENT = 27
 
 MAX_MEASURES = 999
 
@@ -372,8 +372,6 @@ class KshEffectDefine:
             if feedback_level != '100%':
                 define.effect = KshEffect.ECHO
                 define.params['feedbackLevel'] = feedback_level
-                if splitted[0] == '8':
-                    define.params['updatePeriod'] = 0
                 define.params['updateTrigger'] = 'off>on' if splitted[0] == '8' else 'off'
                 define.main_param = f'{define.main_param};{feedback_level}'
             elif float(splitted[3]) < 0:
@@ -382,7 +380,6 @@ class KshEffectDefine:
                 define.params['rate'] = rate
                 if splitted[0] == '8':
                     define.params['updateTrigger'] = 'off>on'
-                    define.params['updatePeriod'] = 0
 
         elif splitted[0] == '2':
             # This is probably correct
@@ -421,7 +418,7 @@ class KshEffectDefine:
         elif splitted[0] == '6':
             # Wobble
             define.effect = KshEffect.WOBBLE
-            define.main_param = int(float(splitted[6])) * 4
+            define.main_param = int(float(splitted[6]) * 4)
             define.params['waveLength'] = f'1/{define.main_param}'
             define.params['loFreq'] = f'{int(float(splitted[4]))}Hz'
             define.params['hiFreq'] = f'{int(float(splitted[5]))}Hz'

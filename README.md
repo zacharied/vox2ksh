@@ -6,6 +6,8 @@ This converts `.vox` charts to `.ksh` charts. If you don't know what those are t
 
 Copy `config.sample.ini` to `config.ini` and edit the copy to contain the necessary paths.
 
+Run all scripts while in repo root directory, **not** while in the `src` directory.
+
 The paths of the chart files and associated data must match the following requirements. Note that the `extractor.py`
 script will extract song audio, preview audio, and jacket artwork with the proper naming schemes.
 

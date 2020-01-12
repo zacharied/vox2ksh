@@ -673,6 +673,26 @@ class EventKind(Enum):
     SPCONTROLLER = auto()
     STOP = auto()
 
+class Background:
+    # As of 2020-01-12, using the definitions from Lasergame.
+    @staticmethod
+    def from_vox_id(vox_id):
+        """ Get the KSH name of the background corresponding to the ID. """
+        if vox_id == 0 or vox_id == 1 or 14 <= vox_id == 16 or vox_id == 71:
+            return 'techno'
+        elif vox_id == 2 or vox_id == 6 or 11 <= vox_id <= 13:
+            return 'wave'
+        elif vox_id == 3 or vox_id == 7:
+            return 'arrow'
+        elif vox_id == 4 or vox_id == 8:
+            # TODO It's kinda a pink version of 'wave'
+            return 'sakura'
+        elif vox_id == 63:
+            return 'smoke'
+        elif vox_id == 65:
+            return 'snow'
+        return 'fallback'
+
 class KshLineBuf:
     """ Represents a single line of notes in KSH (along with effect assignment lines) """
     class ButtonState(Enum):
@@ -1187,6 +1207,8 @@ class Vox:
             f'track{AUDIO_EXTENSION}'
         jacket_basename = '' if jacket_idx is None else f'jacket_{jacket_idx}.png'
 
+        track_bg = Background.from_vox_id(int(self.get_metadata('bg_no')))
+
         header = f'''// Source: {self.source_file_name}
 // Created by vox2ksh-{os.popen('git rev-parse HEAD').read()[:8].strip()}.
 title={self.get_metadata('title_name')}
@@ -1202,8 +1224,8 @@ t={self.bpm_string()}
 m={track_basename}
 mvol={self.get_metadata('volume')}
 o=0
-bg=desert
-layer=arrow
+bg={track_bg}
+layer={track_bg}
 po={int(config['Audio']['hidden_preview_position']) * 1000}
 plength=11000
 pfiltergain={KSH_DEFAULT_FILTER_GAIN}

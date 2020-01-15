@@ -17,6 +17,8 @@ import argparse
 
 from os.path import splitext as splitx
 
+import ksh_effects
+
 # Ticks per a beat of /4 time
 TICKS_PER_BEAT = 48
 
@@ -260,43 +262,20 @@ class KshFilter(Enum):
     HIGHPASS = auto()
     BITCRUSH = auto()
 
-# TODO Use mapped_enum
-class KshEffect(Enum):
-    def to_ksh_simple_name(self):
-        return self.value
-
-    @classmethod
-    def choose_random(cls):
-        choice = random.choice(cls)
-        if choice == cls.TAPESTOP or choice == cls.PITCHSHIFT:
-            return cls.choose_random()
-        return choice
-
-    RETRIGGER = 'Retrigger'
-    GATE = 'Gate'
-    FLANGER = 'Flanger'
-    BITCRUSHER = 'BitCrusher'
-    PHASER = 'Phaser'
-    WOBBLE = 'Wobble'
-    PITCHSHIFT = 'PitchShift'
-    TAPESTOP = 'TapeStop'
-    ECHO = 'Echo'
-    SIDECHAIN = 'SideChain'
-
 class KshEffectDefine:
     def __init__(self):
         self.effect = None
         self.main_param = None
         self.params = {}
 
-    def to_define_line(self, index):
+    def define_line(self, index):
         param_str = ''
         for k, v in self.params.items():
             param_str += f';{k}={v}'
         return f'#define_fx {index} type={self.effect.to_ksh_simple_name()}{param_str}'
 
     def fx_change(self, index, duration=0):
-        if self.effect == KshEffect.TAPESTOP:
+        if self.effect == ksh_effects.KshEffectKind.TAPESTOP:
             # Math lol
             extra = f';{int(2500 / (duration + 10))}'
         else:
@@ -306,42 +285,42 @@ class KshEffectDefine:
     @classmethod
     def from_pre_v4_vox_sound_id(cls, sound_id):
         """Generate an effect definition line from the old-style effect declaration."""
-        define = cls()
+        effect = None
+        main_param = None
+
+        from ksh_effects import KshEffectKind as Kind
 
         if sound_id == 2:
-            define.effect = KshEffect.RETRIGGER
-            define.main_param = '8'
+            effect = Kind.RETRIGGER
+            main_param = '8'
         elif sound_id == 3:
-            define.effect = KshEffect.RETRIGGER
-            define.main_param = '16'
+            effect = Kind.RETRIGGER
+            main_param = '16'
         elif sound_id == 4:
-            define.effect = KshEffect.GATE
-            define.main_param = '16'
+            effect = Kind.GATE
+            main_param = '16'
         elif sound_id == 5:
-            define.effect = KshEffect.FLANGER # TODO Tweak
-            define.main_param = '200' # TODO Screw you USC (by default, flangers have no effect)
+            effect = Kind.FLANGER
+            main_param = '200'
         elif sound_id == 6:
-            define.effect = KshEffect.RETRIGGER
-            define.main_param = '32'
+            effect = Kind.RETRIGGER
+            main_param = '32'
         elif sound_id == 7:
-            define.effect = KshEffect.GATE
-            define.main_param = '8'
+            effect = Kind.GATE
+            main_param = '8'
         elif sound_id == 8:
-            define.effect = KshEffect.PITCHSHIFT
-            define.main_param = '8' # TODO Tweak
+            effect = Kind.PITCHSHIFT
+            main_param = '8' # TODO Tweak
         elif sound_id > 8:
             debug().record(Debug.Level.WARNING, 'fx_parse', f'old vox sound id {sound_id} unknown')
 
-        if define.effect is None:
-            define = cls.default_effect()
-
-        return define
+        return ksh_effects.KshEffect(effect, main_param=main_param) \
+            if effect is not None and main_param is not None \
+            else cls.default_effect()
 
     @classmethod
     def default_effect(cls):
-        define = KshEffectDefine()
-        define.effect = KshEffect.FLANGER
-        define.main_param = '200'
+        define = ksh_effects.KshEffect(ksh_effects.KshEffectKind.FLANGER, main_param='200')
         define.params['depth'] = f'{define.main_param}samples'
         return define
 
@@ -349,115 +328,28 @@ class KshEffectDefine:
     def from_effect_info_line(cls, line):
         splitted = line.replace('\t', '').split(',')
 
-        define = KshEffectDefine()
-
-        if splitted[0] == '1' or splitted[0] == '8':
-            # TODO No way this is right
-            # Retrigger / echo (they're pretty much the same thing)
-            define.effect = KshEffect.RETRIGGER
-
-            if float(splitted[3]) < 0:
-                define.main_param = int(float(splitted[1]) * 16)
-                define.params['waveLength'] = f"1/{define.main_param}"
-                define.params['updatePeriod'] = "1/18"
-            else:
-                define.main_param = int((4 / float(splitted[3])) * float(splitted[1]))
-                define.params['waveLength'] = f'1/{define.main_param}'
-                define.params['updatePeriod'] = f'1/{int(float(splitted[3]))}'
-            rate = f'{int(float(splitted[5]) * 100)}%'
-            feedback_level = f'{int(float(splitted[4]) * 100)}%'
-
-            define.params['mix'] = f'0%>{int(float(splitted[2]))}%'
-
-            if feedback_level != '100%':
-                define.effect = KshEffect.ECHO
-                define.params['feedbackLevel'] = feedback_level
-                define.params['updateTrigger'] = 'off>on' if splitted[0] == '8' else 'off'
-                define.main_param = f'{define.main_param};{feedback_level}'
-            elif float(splitted[3]) < 0:
-                define.params['rate'] = rate
-            else:
-                define.params['rate'] = rate
-                if splitted[0] == '8':
-                    define.params['updateTrigger'] = 'off>on'
-
+        if splitted[0] == '1':
+            return ksh_effects.RetriggerEffect(*splitted[1:])
         elif splitted[0] == '2':
-            # This is probably correct
-            # Gate
-            define.effect = KshEffect.GATE
-            define.main_param = int((2 / float(splitted[3])) * float(splitted[2]))
-            define.params['waveLength'] = f'1/{define.main_param}'
-            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
-
+            return ksh_effects.GateEffect(*splitted[1:])
         elif splitted[0] == '3':
-            # TODO Figure this out
-            # Phaser (more like chorus)
-            define.effect = KshEffect.PHASER
-            define.main_param = '1'
-            define.params['stereoWidth'] = f'{int(float(splitted[4]))}%'
-            define.params['Q'] = str(float(splitted[3]))
-            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
-            define.params['period'] = define.main_param
-
+            return ksh_effects.PhaserEffect(*splitted[1:])
         elif splitted[0] == '4':
-            # TODO This needs some tweaking
-            # Tape stop
-            define.effect = KshEffect.TAPESTOP
-            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
-            # This will be overridden per note based on the note's length.
-            define.main_param = 35
-            define.params['speed'] = f'{define.main_param}%'
-
+            return ksh_effects.TapestopEffect(*splitted[1:])
         elif splitted[0] == '5':
-            # TODO Investigate if this is right
-            # Sidechain
-            define.effect = KshEffect.SIDECHAIN
-            define.main_param = int(float(splitted[2]) * 2)
-            define.params['period'] = f'1/{define.main_param}'
-
+            return ksh_effects.SidechainEffect(*splitted[1:])
         elif splitted[0] == '6':
-            # Wobble
-            define.effect = KshEffect.WOBBLE
-            define.main_param = int(float(splitted[6]) * 4)
-            define.params['waveLength'] = f'1/{define.main_param}'
-            define.params['loFreq'] = f'{int(float(splitted[4]))}Hz'
-            define.params['hiFreq'] = f'{int(float(splitted[5]))}Hz'
-            define.params['Q'] = float(splitted[7])
-            define.params['mix'] = f'0%>{int(float(splitted[3]))}%'
-
+            return ksh_effects.WobbleEffect(*splitted[1:])
         elif splitted[0] == '7':
-            # Bitcrusher
-            define.effect = KshEffect.BITCRUSHER
-            define.main_param = int(splitted[2])
-            define.params['reduction'] = f'{define.main_param}samples'
-            define.params['mix'] = f'0%>{int(float(splitted[1]))}%'
-
+            return ksh_effects.BitcrusherEffect(*splitted[1:])
         elif splitted[0] == '9':
-            # Pitchshift
-            define.effect = KshEffect.PITCHSHIFT
-            define.main_param = int(float(splitted[2]))
-            define.params['pitch'] = define.main_param
-            define.params['mix'] = f'0%>{int(float(splitted[1]))}'
-
+            return ksh_effects.FlangerEffect(*splitted[1:])
         elif splitted[0] == '11':
-            define.effect = KshEffect.WOBBLE
-            define.main_param = 1
-            define.params['loFreq'] = f'{int(float(splitted[3]))}Hz'
-            define.params['hiFreq'] = define.params["loFreq"]
-            define.params['Q'] = '1.4'
-
+            return ksh_effects.PitchshiftEffect(*splitted[1:])
         elif splitted[0] == '12':
-            # High pass effect
-            # TODO This is not right at all and is a placeholder
-            define.effect = KshEffect.FLANGER
-            define.params['depth'] = '200samples'
-            define.params['volume'] = '100%'
-            define.params['mix'] = f'0%>100%'
-
+            return ksh_effects.FlangerEffect(*splitted[1:])
         else:
             raise ValueError(f'effect define id {splitted[0]} is not supported')
-
-        return define
 
 class TabEffectInfo:
     # TODO This is a placeholder
@@ -1489,8 +1381,8 @@ ver=167'''
             debug().current_line_num += 1
 
         for k, v in self.effect_defines.items():
-            print(v.to_define_line(k), file=file)
-        print(self.effect_fallback.to_define_line(EFFECT_FALLBACK_NAME), file=file)
+            print(v.define_line(k), file=file)
+        print(self.effect_fallback.define_line(EFFECT_FALLBACK_NAME), file=file)
 
     def close(self):
         self.voxfile.close()

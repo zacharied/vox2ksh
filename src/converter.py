@@ -78,7 +78,7 @@ class Debug:
         return False
 
     def record_last_exception(self, level=Level.WARNING, tag='python_exception', trace=False):
-        self.record(level, tag, traceback.format_exc() if trace else sys.exc_info()[1])
+        self.record(level, tag, str(sys.exc_info()[1]) + '\n\tTraceback:\n' + '\n'.join(traceback.format_tb(sys.exc_info()[2])))
 
 def truncate(x, digits) -> float:
     stepper = 10.0 ** digits

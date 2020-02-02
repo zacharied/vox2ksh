@@ -127,7 +127,7 @@ class WobbleEffect(KshEffect):
         self.params['mix'] = self.percent(mix, is_decimal=False)
 
 class LowpassEffect(KshEffect):
-    def __init__(self, unknown1, unknown2, freq):
+    def __init__(self, unknown1, unknown2, freq, unknown3):
         super(LowpassEffect, self).__init__(KshEffectKind.WOBBLE)
         self.main_param = 1
         # TOOD Check unknowns.
@@ -143,7 +143,7 @@ class SidechainEffect(KshEffect):
         self.params['holdTime'] = self.suffix(str(int(hold_time)), 'ms')
         self.params['attackTime'] = self.suffix(str(int(attack_time)), 'ms')
         self.params['releaseTime'] = self.suffix(str(int(release_time)), 'ms')
-        self.params['mix'] = self.percent(mix, is_decimal=False)
+        # Sidechain does not take a mix parameter.
 
 class BitcrusherEffect(KshEffect):
     def __init__(self, mix, samples):
@@ -163,7 +163,7 @@ class TapestopEffect(KshEffect):
 class PhaserEffect(KshEffect):
     def __init__(self, mix, period, feedback, stereo_width, high_cut_gain):
         super(PhaserEffect, self).__init__(KshEffectKind.PHASER)
-        self.main_param = int(period) # TODO Safe to convert to int?
+        self.main_param = str(int(float(period)))
         self.params['period'] = self.division(1, period)
         self.params['feedback'] = self.percent(feedback)
         self.params['stereoWidth'] = self.percent(stereo_width, is_decimal=False)
@@ -180,7 +180,7 @@ class PitchshiftEffect(KshEffect):
 class FlangerEffect(KshEffect):
     def __init__(self, mix, samples, depth, period):
         super(FlangerEffect, self).__init__(KshEffectKind.FLANGER)
-        self.main_param = samples / 10
+        self.main_param = str(int(float(samples)) / 10)
         self.params['depth'] = self.suffix(depth, 'samples')
         self.params['period'] = self.division(1, period)
         self.params['mix'] = self.percent(mix, is_decimal=False)

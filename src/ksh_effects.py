@@ -35,6 +35,10 @@ class KshEffect:
         return f'{index}{extra}'
 
     def define_line(self, index):
+        # If this is not set, the effect will ALWAYS be triggered on an FX hold regardless of what effect is actually
+        #  assigned to that.
+        if 'mix' in self.params:
+            self.params['mix'] = f'0%>{self.params["mix"]}'
         param_str = ''
         for k, v in self.params.items():
             param_str += f';{k}={v}'
@@ -82,20 +86,22 @@ class RetriggerEffect(KshEffect):
         super(RetriggerEffect, self).__init__(KshEffectKind.RETRIGGER)
         wavelength = str(int((4 / float(update_period)) * float(division)))
 
+        if float(feedback) != 1.0:
+            self.effect = KshEffectKind.ECHO
+            self.params['feedbackLevel'] = self.percent(feedback)
+
         if float(update_period) > 0:
             self.main_param = wavelength
             self.params['waveLength'] = self.division(1, wavelength)
             self.params['updatePeriod'] = self.division(1, update_period)
-            self.params['rate'] = self.percent(rate)
+            if self.effect != KshEffectKind.ECHO:
+                # Echo does not take 'rate'.
+                self.params['rate'] = self.percent(str(1.0 - float(rate)))
         else:
             # TODO This may or may not be correct.
             self.main_param = str(int(float(wavelength) * 16))
             self.params['waveLength'] = f'1/{self.main_param}'
             self.params['updatePeriod'] = '1/18'
-
-        if float(feedback) != 1.0:
-            self.effect = KshEffectKind.ECHO
-            self.params['feedbackLevel'] = self.percent(feedback)
 
         self.params['mix'] = self.percent(mix, is_decimal=False)
 
@@ -120,7 +126,7 @@ class WobbleEffect(KshEffect):
         self.main_param = None if type(wavelength) is tuple else str(int(float(wavelength) * 4))
 
         # Perform the multiplication on our wavelength through a helper in the event that it's a tuple.
-        self.params['waveLength'] = self.division(1, self.operate(wavelength, lambda n: int(float(n) * 4)))
+        self.params['waveLength'] = self.division(1, str(self.operate(wavelength, lambda n: int(float(n) * 4))))
         self.params['loFreq'] = self.suffix(str(int(float(low_freq))), 'Hz')
         self.params['hiFreq'] = self.suffix(str(int(float(high_freq))), 'Hz')
         self.params['Q'] = float(resonance)

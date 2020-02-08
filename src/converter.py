@@ -27,7 +27,7 @@ SLAM_TICKS = 4
 FX_CHIP_SOUND_COUNT = 14
 
 KSH_DEFAULT_FILTER_GAIN = 50
-KSH_DEFAULT_SLAM_VOL = 59
+KSH_DEFAULT_SLAM_VOL = 40
 
 EFFECT_FALLBACK_NAME = 'fallback'
 
@@ -342,10 +342,12 @@ class KshEffectDefine:
             return ksh_effects.WobbleEffect(*splitted[1:])
         elif splitted[0] == '7':
             return ksh_effects.BitcrusherEffect(*splitted[1:])
+        elif splitted[0] == '8':
+            return ksh_effects.UpdateableRetriggerEffect(*splitted[1:])
         elif splitted[0] == '9':
-            return ksh_effects.FlangerEffect(*splitted[1:])
-        elif splitted[0] == '11':
             return ksh_effects.PitchshiftEffect(*splitted[1:])
+        elif splitted[0] == '11':
+            return ksh_effects.LowpassEffect(*splitted[1:])
         elif splitted[0] == '12':
             return ksh_effects.FlangerEffect(*splitted[1:])
         else:
